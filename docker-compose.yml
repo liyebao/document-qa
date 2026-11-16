@@ -1,0 +1,111 @@
+name: document-qa
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: qa
+      POSTGRES_PASSWORD: qa
+      POSTGRES_DB: document_qa
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qa -d document_qa"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://qa:qa@db:5432/document_qa
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY}
+      CREDENTIAL_ENCRYPTION_KEY_VERSION: ${CREDENTIAL_ENCRYPTION_KEY_VERSION:-1}
+      UPLOAD_DIR: /app/storage/uploads
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
+      RETRIEVAL_CANDIDATES: ${RETRIEVAL_CANDIDATES:-20}
+      RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-5}
+      RRF_K: ${RRF_K:-60}
+      RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
+      RERANK_CANDIDATES: ${RERANK_CANDIDATES:-15}
+      RERANK_STRATEGY: ${RERANK_STRATEGY:-auto}
+      DIVERSITY_ENABLED: ${DIVERSITY_ENABLED:-true}
+      MMR_LAMBDA: ${MMR_LAMBDA:-0.7}
+      MMR_MAX_PER_DOCUMENT: ${MMR_MAX_PER_DOCUMENT:-2}
+      EVIDENCE_EXPANSION_ROUNDS: ${EVIDENCE_EXPANSION_ROUNDS:-1}
+      EVIDENCE_EXPANSION_TERMS: ${EVIDENCE_EXPANSION_TERMS:-2}
+      AGENT_MAX_TOOL_ROUNDS: ${AGENT_MAX_TOOL_ROUNDS:-3}
+      AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-6}
+      CHUNK_TARGET_TOKENS: ${CHUNK_TARGET_TOKENS:-800}
+      CHUNK_MIN_TOKENS: ${CHUNK_MIN_TOKENS:-600}
+      CHUNK_OVERLAP_TOKENS: ${CHUNK_OVERLAP_TOKENS:-80}
+      MODEL_HTTP_TIMEOUT: ${MODEL_HTTP_TIMEOUT:-180}
+      MODEL_MAX_RETRIES: ${MODEL_MAX_RETRIES:-2}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-16}
+      # 容器内 localhost 指向容器自身，本地 Ollama 要走宿主机地址。
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
+      RATE_LIMIT_ASK_PER_MINUTE: ${RATE_LIMIT_ASK_PER_MINUTE:-30}
+      RATE_LIMIT_UPLOAD_PER_MINUTE: ${RATE_LIMIT_UPLOAD_PER_MINUTE:-30}
+      RATE_LIMIT_REINDEX_PER_MINUTE: ${RATE_LIMIT_REINDEX_PER_MINUTE:-3}
+      INGESTION_MODE: ${INGESTION_MODE:-inline}
+      JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
+    ports:
+      # 容器内仍监听 8000；宿主机用 8001，避免与本地 uvicorn 冲突。
+      - "127.0.0.1:8001:8000"
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    build: ./backend
+    command: ["sh", "-c", "alembic upgrade head && python -m app.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://qa:qa@db:5432/document_qa
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY}
+      CREDENTIAL_ENCRYPTION_KEY_VERSION: ${CREDENTIAL_ENCRYPTION_KEY_VERSION:-1}
+      UPLOAD_DIR: /app/storage/uploads
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-16}
+      MODEL_HTTP_TIMEOUT: ${MODEL_HTTP_TIMEOUT:-180}
+      MODEL_MAX_RETRIES: ${MODEL_MAX_RETRIES:-2}
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
+      INGESTION_MODE: worker
+      WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-2}
+      WORKER_LOCK_TIMEOUT_SECONDS: ${WORKER_LOCK_TIMEOUT_SECONDS:-600}
+      JOB_MAX_ATTEMPTS: ${JOB_MAX_ATTEMPTS:-3}
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      # backend 也执行 alembic upgrade head；等它就绪后再迁移，避免两个容器同时建表互相撞车。
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  pgdata:

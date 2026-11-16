@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "document-qa-backend"
+version = "0.1.0"
+description = "面向个人多文件资料的知识库问答系统后端"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "sqlalchemy==2.0.36",
+    "psycopg[binary]==3.2.3",
+    "pgvector==0.3.6",
+    "alembic==1.14.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "python-multipart==0.0.20",
+    "cryptography==44.0.0",
+    "httpx==0.28.1",
+    "pypdf==5.1.0",
+    "python-docx==1.1.2",
+    "python-pptx==1.0.2",
+    "openpyxl==3.1.5",
+    "trafilatura==2.3.1",
+    "jieba==0.42.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-cov==6.0.0",
+    "ruff==0.8.4",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: 需要 PostgreSQL 与 pgvector 的集成测试",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]

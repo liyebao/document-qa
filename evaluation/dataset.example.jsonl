@@ -1,0 +1,8 @@
+{"question": "这份资料的主要结论是什么？", "category": "单文件事实题", "expected_refusal": false, "expected_points": ["主要结论"], "expected_evidence": ["示例片段"], "expected_files": ["项目风险报告.pdf"], "expected_chunk_ids": []}
+{"question": "项目计划中约定的交付日期是哪一天？", "category": "精确匹配题", "expected_refusal": false, "expected_points": ["日期"], "expected_evidence": ["日期所在片段"], "expected_files": ["项目计划.md"], "expected_chunk_ids": []}
+{"question": "两份报告对项目风险的结论有什么异同？", "category": "跨文件比较题", "expected_refusal": false, "expected_points": ["相同点", "不同点"], "expected_evidence": ["报告A", "报告B"], "expected_files": ["项目风险报告.pdf", "风险评估说明.docx"], "expected_chunk_ids": []}
+{"question": "预算总额是多少，各阶段分别支出多少？", "category": "组合/多跳题", "expected_refusal": false, "expected_points": ["预算总额", "阶段支出"], "expected_evidence": ["预算表", "阶段计划"], "expected_files": ["预算说明.docx", "项目计划.md"], "expected_chunk_ids": []}
+{"question": "项目延期后采取了哪些补救措施？", "category": "跨文件比较题", "expected_refusal": false, "expected_points": ["补救措施"], "expected_evidence": ["延期说明", "会议纪要"], "expected_files": ["项目风险报告.pdf", "会议纪要.md"], "expected_chunk_ids": []}
+{"question": "两份资料对是否追加预算的判断是否一致？", "category": "冲突资料题", "expected_refusal": false, "expected_points": ["一致或不一致", "各自理由"], "expected_evidence": ["预算说明", "风险评估"], "expected_files": ["预算说明.docx", "风险评估说明.docx"], "expected_chunk_ids": []}
+{"question": "资料中列出的三个关键里程碑分别是什么？", "category": "单文件事实题", "expected_refusal": false, "expected_points": ["里程碑一", "里程碑二", "里程碑三"], "expected_evidence": ["里程碑列表"], "expected_files": ["项目计划.md"], "expected_chunk_ids": []}
+{"question": "资料是否说明了未来五年的营收预测？", "category": "无答案题", "expected_refusal": true, "expected_points": [], "expected_evidence": [], "expected_files": [], "expected_chunk_ids": []}

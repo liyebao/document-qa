@@ -1,0 +1,19 @@
+# 运行时依赖清单，供 Dockerfile 做层缓存用；与 pyproject.toml 的 dependencies 保持一致。
+# 这里只钉直接依赖的版本，传递依赖仍由 pip 解析；要完全锁定传递依赖需另生成锁文件。
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+psycopg[binary]==3.2.3
+pgvector==0.3.6
+alembic==1.14.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-multipart==0.0.20
+cryptography==44.0.0
+httpx==0.28.1
+pypdf==5.1.0
+python-docx==1.1.2
+python-pptx==1.0.2
+openpyxl==3.1.5
+trafilatura==2.3.1
+jieba==0.42.1

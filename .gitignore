@@ -1,0 +1,44 @@
+# 环境与密钥
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+*.tsbuildinfo
+
+# Node
+node_modules/
+dist/
+*.local
+
+# 运行产物
+storage/uploads/
+# 本地模型权重（如把 OLLAMA_MODELS 指向项目内）
+storage/models/
+logs/
+*.log
+*.db
+*.sqlite
+
+# IDE / 系统
+.idea/
+.vscode/
+.screenshots/
+.DS_Store
+Thumbs.db
+
+# 评测私有数据
+evaluation/reports/*
+!evaluation/reports/.gitkeep
