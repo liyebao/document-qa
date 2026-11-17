@@ -24,7 +24,14 @@ dist/
 *.local
 
 # 运行产物
+.trae
+.impeccable
 storage/uploads/
+
+# AI 插件产物；CI 仍保留在 .github/workflows 下
+.github/agents/
+.github/hooks/
+.github/skills/
 # 本地模型权重（如把 OLLAMA_MODELS 指向项目内）
 storage/models/
 logs/
