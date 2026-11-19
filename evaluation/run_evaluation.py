@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-
+from analyze_traces import attach_retrieval, load_traces
 from metrics import summarize
 
 DEFAULT_BASE_URL = "http://localhost:8000"
@@ -84,7 +84,9 @@ def run_case(
     return record
 
 
-def write_report(records: list[dict], dataset: Path, base_url: str) -> Path:
+def write_report(
+    records: list[dict], dataset: Path, base_url: str, log_path: Path | None = None
+) -> Path:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     stem = f"{stamp}-api-{dataset.stem}"
@@ -93,6 +95,7 @@ def write_report(records: list[dict], dataset: Path, base_url: str) -> Path:
         "run_at": datetime.now().isoformat(timespec="seconds"),
         "base_url": base_url,
         "dataset": str(dataset),
+        "trace_log": str(log_path) if log_path else None,
         "summary": summarize(records),
         "records": records,
     }
@@ -105,6 +108,7 @@ def write_report(records: list[dict], dataset: Path, base_url: str) -> Path:
         f"- 运行时间：{payload['run_at']}",
         f"- 后端地址：{base_url}",
         f"- 数据集：{dataset}",
+        f"- 检索轨迹：{log_path or '未使用'}",
         "",
         "## 汇总（仅本次实际运行）",
         "",
@@ -133,13 +137,26 @@ def main() -> None:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--collection-id", required=True)
     parser.add_argument("--dataset", type=Path, default=Path("evaluation/dataset.example.jsonl"))
+    parser.add_argument(
+        "--log",
+        type=Path,
+        default=Path("logs/backend.log"),
+        help="后端检索轨迹日志；存在时自动补齐文件级/片段级召回指标",
+    )
     args = parser.parse_args()
 
     dataset = load_dataset(args.dataset)
     with httpx.Client(base_url=args.base_url, timeout=180.0) as client:
         records = [run_case(client, args.collection_id, case) for case in dataset]
 
-    report_path = write_report(records, args.dataset, args.base_url)
+    if args.log.exists():
+        missing = attach_retrieval(records, load_traces(args.log))
+        if missing:
+            print(f"警告：{missing}/{len(records)} 条记录没有找到对应检索轨迹，相关指标会跳过")
+    else:
+        print(f"警告：未找到检索轨迹日志 {args.log}，召回类指标不可用")
+
+    report_path = write_report(records, args.dataset, args.base_url, args.log)
     print(f"已写入评测报告：{report_path}")
     print(json.dumps(summarize(records), ensure_ascii=False, indent=2))
 

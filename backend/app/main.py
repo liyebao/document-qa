@@ -2,15 +2,18 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.api.routes import collections, conversations, documents, settings
 from app.core.config import get_settings
 from app.core.errors import AppError, app_error_handler
 from app.core.logging import configure_logging
+from app.db.session import get_db
 from app.services.ingestion import mark_stale_documents_failed
 from app.services.local_user import ensure_local_user
 from app.services.model_provider import close_http_client
@@ -98,7 +101,9 @@ def create_app() -> FastAPI:
     app.include_router(conversations.router)
 
     @app.get("/api/health", tags=["system"])
-    def health() -> dict[str, str]:
+    def health(db: Session = Depends(get_db)) -> dict[str, str]:
+        # 数据库不可用时返回 500，Docker healthcheck 才能真实反映服务状态。
+        db.execute(text("SELECT 1"))
         return {"status": "ok"}
 
     return app

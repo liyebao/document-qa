@@ -70,3 +70,6 @@ def _build_limiters() -> tuple[
 
 
 ask_limiter, upload_limiter, reindex_limiter = _build_limiters()
+settings_limiter = SlidingWindowLimiter(
+    get_settings().rate_limit_settings_per_minute
+)

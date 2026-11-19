@@ -280,10 +280,19 @@ class DocumentQAAgent:
             candidates = self._apply_diversity(candidates)
 
         evidence: list[EvidenceItem] = []
-        for chunk_id, score in candidates[: settings.retrieval_top_k]:
+        seen_fingerprints: set[str] = set()
+        for chunk_id, score in candidates:
+            if len(evidence) >= settings.retrieval_top_k:
+                break
             entry = self._chunks.get(chunk_id)
             if entry is None:
                 continue
+            # 同一份内容重复入库时，fingerprint 相同；只保留排名最高的一份。
+            fingerprint = entry[0].fingerprint
+            if fingerprint:
+                if fingerprint in seen_fingerprints:
+                    continue
+                seen_fingerprints.add(fingerprint)
             evidence.append(
                 EvidenceItem(
                     index=len(evidence) + 1,
@@ -361,7 +370,8 @@ class DocumentQAAgent:
             if entry is None:
                 continue
             chunk_ids.append(chunk_id)
-            documents.append(entry[0].text[:2000])
+            # 2000 字符对中文只有约 1000 token，块尾会完全丢失精排信号。
+            documents.append(entry[0].text[:6000])
         if not documents:
             return dict(self.rerank_scores) or None
 

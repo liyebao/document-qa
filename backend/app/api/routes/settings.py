@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import ask_rate_limit, get_current_user
+from app.api.deps import get_current_user, settings_rate_limit
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.settings import (
@@ -31,6 +31,7 @@ def save_model_provider(
     payload: ModelProviderConfigCreate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    _: None = Depends(settings_rate_limit),
 ) -> ModelProviderConfigOut:
     return model_provider.upsert_config(db, user, payload)
 
@@ -41,6 +42,7 @@ def set_model_provider_role(
     payload: ProviderRoleRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    _: None = Depends(settings_rate_limit),
 ) -> ModelProviderSettingsOut:
     return model_provider.set_preferred_provider(db, user, config_id, payload.role)
 
@@ -51,7 +53,7 @@ def test_model_provider(
     payload: ConnectionTestRequest | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    _: None = Depends(ask_rate_limit),
+    _: None = Depends(settings_rate_limit),
 ) -> ConnectionTestResult:
     role = payload.role if payload else None
     return model_provider.test_connection(db, user, config_id, role)
@@ -62,6 +64,7 @@ def delete_model_provider(
     config_id: uuid.UUID,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    _: None = Depends(settings_rate_limit),
 ) -> Response:
     model_provider.delete_config(db, user, config_id)
     return Response(status_code=204)

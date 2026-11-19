@@ -7,18 +7,53 @@ import logging
 import os
 import signal
 import socket
+import threading
 import time
 import uuid
+
+from sqlalchemy import func, update
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal
-from app.models.processing_job import ProcessingJob
+from app.models.processing_job import JOB_STATUS_RUNNING, ProcessingJob
 from app.services import ingestion, jobs
 
 logger = logging.getLogger(__name__)
 
 _stop = False
+# 大文件入库可能远超锁超时；处理期间定期续期，避免被 reap_stale 误判为死任务。
+_HEARTBEAT_SECONDS = 30
+
+
+def _start_heartbeat(job_id: uuid.UUID) -> threading.Event:
+    """后台线程定期刷新 locked_at；收到停止信号或任务结束时退出。"""
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(_HEARTBEAT_SECONDS):
+            db = SessionLocal()
+            try:
+                db.execute(
+                    update(ProcessingJob)
+                    .where(
+                        ProcessingJob.id == job_id,
+                        ProcessingJob.status == JOB_STATUS_RUNNING,
+                    )
+                    .values(locked_at=func.now())
+                )
+                db.commit()
+            except Exception:  # noqa: BLE001  心跳失败不能让任务直接中断
+                db.rollback()
+                logger.warning("任务心跳更新失败 job_id=%s", job_id)
+            finally:
+                db.close()
+
+    thread = threading.Thread(
+        target=beat, name=f"job-heartbeat-{job_id}", daemon=True
+    )
+    thread.start()
+    return stop
 
 
 def _handle_signal(signum: int, frame: object) -> None:
@@ -38,6 +73,7 @@ def _run_once(worker_id: str) -> bool:
     if job is None:
         return False
 
+    heartbeat = _start_heartbeat(job.id)
     try:
         ingestion.run_ingestion(job.document_id)
     except Exception as exc:  # noqa: BLE001  失败要写回任务表
@@ -57,6 +93,8 @@ def _run_once(worker_id: str) -> bool:
                 jobs.mark_succeeded(db, current)
         finally:
             db.close()
+    finally:
+        heartbeat.set()
 
     return True
 

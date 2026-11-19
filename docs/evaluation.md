@@ -2,8 +2,8 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | v1.1 |
-| 状态 | 评测脚本、Recall@K/MRR 轨迹分析与示例数据集已建立；尚未在真实资料上运行，不提供任何效果结论 |
+| 文档版本 | v1.2 |
+| 状态 | 评测脚本、Recall@K/MRR 轨迹分析与示例数据集已建立；日志自动落盘，报告可自动补齐检索指标；尚未在真实资料上运行，不提供任何效果结论 |
 
 ## 1. 评测集格式
 
@@ -46,15 +46,17 @@
 - 复合问题各子问题是否有片段进入上下文
 - 检索耗时、回答耗时、回答状态（`completed`、`insufficient`、`failed`）与错误码
 
-轨迹不记录资料正文、用户问题和 API Key，但会记录文件名和 chunk/document ID；如果文件名本身敏感，请在脱敏后的资料集上评测。需要分析 Recall@K 或 MRR 时，将后端日志重定向到文件（例如 `logs/backend.log`），先运行 `run_evaluation.py` 生成 JSON 报告，再运行：
+轨迹不记录资料正文、用户问题和 API Key，但会记录文件名和 chunk/document ID；如果文件名本身敏感，请在脱敏后的资料集上评测。
+
+后端启动时会同时写入控制台和 `logs/backend.log`（5 MB 轮转、保留 3 份），容器内通过 `LOG_DIR=/app/logs` 挂载到宿主 `./logs`。`run_evaluation.py` 默认读取该日志，按 `conversation_id` 自动把报告中的题目与轨迹关联，补齐文件级/片段级 Recall 与 MRR；日志不存在时只输出提示，不会伪造指标。也可以对已有报告单独重算：
 
 ```powershell
 backend\.venv\Scripts\python evaluation\analyze_traces.py `
-  --log ..\logs\backend.log `
-  --report ..\evaluation\reports\<运行报告>.json
+  --log logs\backend.log `
+  --report evaluation\reports\<运行报告>.json
 ```
 
-脚本按 `conversation_id` 把报告中的题目与轨迹关联，输出 `<时间>-trace-<报告名>.json/.md`。
+脚本输出 `<时间>-trace-<报告名>.json/.md`，并按召回模式与重排策略分组。
 
 ## 4. 运行方式
 

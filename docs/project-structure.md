@@ -228,7 +228,7 @@ storage/
 | 字段 | 小写下划线 | `created_at`、`page_start` |
 | 外键 | `<单数表名>_id` | `collection_id` |
 | 索引 | `ix_<表>_<字段>` | `ix_chunks_document_id` |
-| 唯一约束 | `uq_<表>_<字段>` | `uq_documents_checksum` |
+| 唯一约束 | `uq_<表>_<字段>` | `uq_documents_collection_checksum`、`uq_chunks_document_ordinal` |
 
 ### 7.3 接口与配置
 

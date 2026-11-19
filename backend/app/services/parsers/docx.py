@@ -1,5 +1,6 @@
 import re
 from io import BytesIO
+from pathlib import Path
 
 from docx import Document as DocxDocument
 from docx.oxml.ns import qn
@@ -27,9 +28,9 @@ def _table_to_text(table: Table) -> str:
     return "\n".join(rows)
 
 
-def parse_docx(data: bytes) -> list[TextBlock]:
+def parse_docx(data: bytes | Path) -> list[TextBlock]:
     try:
-        document = DocxDocument(BytesIO(data))
+        document = DocxDocument(BytesIO(data) if isinstance(data, bytes) else data)
     except Exception as exc:  # noqa: BLE001
         raise ParseError("DOCX 文件损坏或格式不正确") from exc
 

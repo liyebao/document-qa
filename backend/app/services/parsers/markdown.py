@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 from app.services.parsers.base import ParseError, TextBlock, normalize_text
 
@@ -6,12 +7,13 @@ _HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.*)$")
 _FENCE_PATTERN = re.compile(r"^\s*(```|~~~)")
 
 
-def parse_markdown(data: bytes) -> list[TextBlock]:
+def parse_markdown(data: bytes | Path) -> list[TextBlock]:
+    raw = data if isinstance(data, bytes) else data.read_bytes()
     try:
-        text = data.decode("utf-8")
+        text = raw.decode("utf-8")
     except UnicodeDecodeError:
         try:
-            text = data.decode("gbk")
+            text = raw.decode("gbk")
         except UnicodeDecodeError as exc:
             raise ParseError("Markdown 文件编码无法识别，请使用 UTF-8") from exc
 

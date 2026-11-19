@@ -28,8 +28,12 @@ class Settings(BaseSettings):
     rate_limit_ask_per_minute: int = 30
     rate_limit_upload_per_minute: int = 30
     rate_limit_reindex_per_minute: int = 3
+    # 模型配置写入会触发真实计费调用（连接测试），单独限流，避免脚本刷爆。
+    rate_limit_settings_per_minute: int = 30
 
     upload_dir: Path = PROJECT_ROOT / "storage" / "uploads"
+    # 检索轨迹等日志的落盘目录；容器内用 LOG_DIR=/app/logs。
+    log_dir: Path = PROJECT_ROOT / "logs"
     max_upload_mb: int = 100
 
     # 本地 Ollama 的 OpenAI 兼容地址；Docker 部署时设为

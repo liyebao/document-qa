@@ -30,14 +30,9 @@ class FetchedPage:
 
 
 def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return not (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
-    )
+    # is_global 同时排除 CGNAT(100.64/10)、benchmark(198.18/15)、保留段和链路本地，
+    # 比自行枚举黑名单更稳妥。
+    return ip.is_global
 
 
 def _assert_public_host(hostname: str, port: int) -> None:
@@ -74,6 +69,29 @@ def validate_url(url: str) -> str:
         raise AppError("URL_FORBIDDEN", "该网址指向本机地址，已拒绝抓取", 422)
     _assert_public_host(hostname, port or (443 if parsed.scheme == "https" else 80))
     return url
+
+
+def _assert_connected_peer(response: httpx.Response) -> None:
+    """连接建立后复核实际对端 IP，防止 DNS rebinding 绕过预解析校验。
+
+    httpcore 在 ``network_stream`` 扩展里暴露真实 socket 地址；拿不到时
+    保持原行为（至少预解析已校验），拿到就必须是公网地址。
+    """
+    stream = response.extensions.get("network_stream")
+    if stream is None:
+        return
+    try:
+        address = stream.get_extra_info("server_addr")
+    except Exception:  # noqa: BLE001  不同 httpcore 版本实现有差异
+        return
+    if not address:
+        return
+    try:
+        ip = ipaddress.ip_address(str(address[0]).split("%", 1)[0])
+    except ValueError as exc:
+        raise AppError("URL_FORBIDDEN", "网页实际连接地址不合法", 422) from exc
+    if not ip.is_global:
+        raise AppError("URL_FORBIDDEN", "该网址实际连接到内网或保留地址，已拒绝抓取", 422)
 
 
 def _decode_html(data: bytes, declared: str | None) -> str:
@@ -150,6 +168,7 @@ def fetch_page(url: str) -> FetchedPage:
                     content_type = response.headers.get("content-type", "").lower()
                     if "html" not in content_type and "text/" not in content_type:
                         raise AppError("URL_UNSUPPORTED", "该链接不是可解析的网页内容", 422)
+                    _assert_connected_peer(response)
                     declared = response.charset_encoding
                     html = _decode_html(_read_limited(response), declared)
         except httpx.HTTPError as exc:

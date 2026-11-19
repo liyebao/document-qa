@@ -233,6 +233,22 @@
 
 处理状态：`processing` → `ready` 或 `failed`。失败原因通过 `failure_reason` 返回。
 
+### POST `/api/collections/{id}/documents/text`
+
+```json
+{ "title": "会议纪要", "content": "粘贴的正文……" }
+```
+
+把粘贴文本作为 `.txt` 资料入库，`title` 1–200 字、`content` 最长 200,000 字，响应 `202`，结构同上，`source_type = "text"`。
+
+### POST `/api/collections/{id}/documents/url`
+
+```json
+{ "url": "https://example.com/report" }
+```
+
+抓取网页正文后作为 Markdown 资料入库，响应 `202`，`source_type = "url"`，同时保存 `source_url` 和 `fetched_at`。只允许 http/https 公网地址，重定向逐跳校验；内网或保留地址返回 `422 URL_FORBIDDEN`，正文超过 5 MB 返回 `413 URL_TOO_LARGE`。
+
 ### GET `/api/collections/{id}/documents`
 
 返回当前有效版本文件列表（不含已删除、历史版本）。
@@ -240,6 +256,21 @@
 ### GET `/api/documents/{id}/file`
 
 返回当前用户有权限访问的原文件，供前端“查看/下载原文”使用。PDF 以 `application/pdf` 内联返回，浏览器可直接打开并支持 `#page=N` 页码跳转；Markdown 以 `text/plain` 返回；DOCX 返回原始 Office 文件，浏览器通常会下载。只允许当前版本、未删除的文件。
+
+### GET `/api/documents/{id}/chunks/{chunk_id}/context`
+
+返回引用片段及其前后各一段，供前端展开核对：
+
+```json
+{
+  "document_id": "<uuid>",
+  "document_name": "report.pdf",
+  "format": "pdf",
+  "chunk": { "chunk_id": "<uuid>", "ordinal": 3, "source_location": "第 3 页 · 3.2 风险应对", "text": "……" },
+  "previous": { "chunk_id": "<uuid>", "ordinal": 2, "source_location": "第 2 页 · 3.1 风险识别", "text": "……" },
+  "next": null
+}
+```
 
 ### POST `/api/documents/{id}/replace`
 
@@ -293,7 +324,7 @@
           "document_id": "<uuid>",
           "marker_index": 1,
           "document_name": "report.pdf",
-          "source_location": "第 3 页",
+          "source_location": "第 3 页 · 3.2 风险应对",
           "quote_snapshot": "原文片段……"
         }
       ]
@@ -326,6 +357,19 @@
 - 如果问题中明确写出了资料集内的文件名，后端只在该文件范围内检索；写出的文件名不存在时不会退化为全资料集检索。
 - 无足够证据时 `assistant_message.status = insufficient`，内容为“当前资料无法确认……”。
 
+### POST `/api/conversations/{id}/messages/stream`
+
+请求体与上一个接口相同，响应 `text/event-stream`，事件顺序如下：
+
+| event | data |
+|---|---|
+| `status` | `{"stage": "retrieval"}` 或 `{"stage": "answering"}` |
+| `delta` | `{"text": "增量文本"}` |
+| `done` | `{"assistant_message": {…含 citations}, "user_message": {…}}` |
+| `error` | `{"code": "…", "message": "…"}` |
+
+检索结束后后端会释放数据库连接，模型生成期间不占用连接池；客户端断开时会用独立会话保存已生成的内容（`status = failed`），不会留下只有提问没有回答的会话。
+
 ### DELETE `/api/conversations/{id}`
 
 删除会话及其消息、引用，返回 `204`。
@@ -337,6 +381,8 @@
 ```json
 { "status": "ok" }
 ```
+
+会执行一次 `SELECT 1`；数据库不可用时返回 500，供 Docker healthcheck 和前端启动依赖真实判断。
 
 ## 7. 错误码
 

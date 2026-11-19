@@ -37,7 +37,12 @@ def client():
 @pytest.fixture(autouse=True)
 def _clean_user_data(client):
     """单用户模式共享一个本地用户，每个测试前清理业务数据，避免配置/限流互相影响。"""
-    from app.core.ratelimit import ask_limiter, reindex_limiter, upload_limiter
+    from app.core.ratelimit import (
+        ask_limiter,
+        reindex_limiter,
+        settings_limiter,
+        upload_limiter,
+    )
     from app.db.session import engine
 
     with engine.begin() as connection:
@@ -54,7 +59,12 @@ def _clean_user_data(client):
                 "preferred_chat_provider = NULL"
             )
         )
-    for limiter in (ask_limiter, upload_limiter, reindex_limiter):
+    for limiter in (
+        ask_limiter,
+        upload_limiter,
+        reindex_limiter,
+        settings_limiter,
+    ):
         limiter.reset()
     yield
 
@@ -885,3 +895,52 @@ def test_processing_jobs_queue(client: TestClient) -> None:
         assert claimed_again.status == "succeeded"
 
         assert jobs.reap_stale(db, 0) == 0
+
+
+def test_stream_answer_persists_with_short_sessions(
+    client: TestClient, monkeypatch
+) -> None:
+    """流式接口在检索后释放连接，仍能正常落库并返回 done 事件。"""
+    token = _register(client, f"stream-{uuid.uuid4().hex[:8]}@example.com")
+    headers = _headers(token)
+    _save_provider(client, headers)
+    monkeypatch.setattr("app.services.embeddings.embed_texts", _fake_embedding(4))
+    monkeypatch.setattr(
+        "app.services.model_provider.chat_completion",
+        lambda *args, **kwargs: "项目风险是什么？",
+    )
+    monkeypatch.setattr(
+        "app.services.model_provider.chat_with_tools",
+        lambda *args, **kwargs: {"content": "READY"},
+    )
+    monkeypatch.setattr(
+        "app.services.model_provider.chat_completion_stream",
+        lambda *args, **kwargs: iter(["项目存在进度风险[1]。"]),
+    )
+
+    collection = _create_collection(client, headers, "流式资料集")
+    _upload_markdown(
+        client, headers, collection["id"], "# 风险\n\n项目存在进度风险。"
+    )
+    conversation = client.post(
+        f"/api/collections/{collection['id']}/conversations",
+        json={},
+        headers=headers,
+    ).json()
+
+    response = client.post(
+        f"/api/conversations/{conversation['id']}/messages/stream",
+        json={"content": "项目风险是什么？"},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert "event: delta" in response.text
+    assert "event: done" in response.text
+    assert "进度风险" in response.text
+
+    detail = client.get(
+        f"/api/conversations/{conversation['id']}", headers=headers
+    ).json()
+    assert [message["role"] for message in detail["messages"]] == ["user", "assistant"]
+    assert detail["messages"][1]["status"] == "completed"
+    assert detail["messages"][1]["citations"]

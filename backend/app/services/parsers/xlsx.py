@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from io import BytesIO
+from pathlib import Path
 
 from openpyxl import load_workbook
 
@@ -31,9 +32,10 @@ def _markdown_table(header: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-def parse_xlsx(data: bytes) -> list[TextBlock]:
+def parse_xlsx(data: bytes | Path) -> list[TextBlock]:
+    source = BytesIO(data) if isinstance(data, bytes) else data
     try:
-        workbook = load_workbook(BytesIO(data), data_only=True, read_only=True)
+        workbook = load_workbook(source, data_only=True, read_only=True)
     except Exception as exc:  # noqa: BLE001
         raise ParseError("XLSX 文件损坏或格式不正确") from exc
 

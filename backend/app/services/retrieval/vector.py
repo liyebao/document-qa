@@ -1,7 +1,7 @@
 import uuid
 
 from pgvector.sqlalchemy import HALFVEC, VECTOR
-from sqlalchemy import bindparam, func, select
+from sqlalchemy import bindparam, func, select, text
 from sqlalchemy.orm import Session
 
 from app.models.chunk import Chunk
@@ -55,6 +55,10 @@ def vector_search(
         conditions.append(dimension_filter)
     if document_ids is not None:
         conditions.append(Document.id.in_(document_ids))
+    if len(query_vector) in _ANN_VECTOR_DIMENSIONS | _ANN_HALFVEC_DIMENSIONS:
+        # 过滤条件较多时默认 ef_search=40 容易召回不足；只在命中 ANN 索引时调整，
+        # 不影响精确扫描路径。
+        db.execute(text("SET LOCAL hnsw.ef_search = 100"))
     stmt = (
         select(Chunk.id)
         .join(Document, Chunk.document_id == Document.id)

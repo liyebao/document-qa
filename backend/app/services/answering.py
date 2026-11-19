@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.core.secrets import decrypt_secret
+from app.db.session import SessionLocal
 from app.models.citation import Citation
 from app.models.collection import Collection
 from app.models.conversation import Conversation
@@ -173,6 +174,23 @@ def _chat(
     )
 
 
+def _history_messages(
+    history: list[Message], *, limit: int = 4, max_chars: int = 400
+) -> list[dict[str, str]]:
+    """把最近几轮对话带进生成 prompt，解决“刚才那个方案再展开”这类指代。
+
+    只带角色和截断后的正文，不带引用与内部字段；失败轮次也保留，
+    让模型知道上一轮没有有效回答。
+    """
+    messages: list[dict[str, str]] = []
+    for item in history[-limit:]:
+        content = (item.content or "").strip()
+        if not content:
+            continue
+        messages.append({"role": item.role, "content": content[:max_chars]})
+    return messages
+
+
 def _save_failed(db: Session, conversation: Conversation) -> None:
     """把失败的助手轮次落库，避免会话里只留下一个没有回答的提问。"""
     try:
@@ -213,201 +231,281 @@ def _message_payload(message: Message, citations: list[Citation]) -> dict:
     ).model_dump(mode="json")
 
 
+def _save_assistant_message(
+    conversation_id: uuid.UUID, content: str, status: str
+) -> Message | None:
+    """用独立短会话写入助手消息，供流式失败/中断兜底。"""
+    db = SessionLocal()
+    try:
+        message = Message(
+            conversation_id=conversation_id,
+            role=MESSAGE_ROLE_ASSISTANT,
+            content=content,
+            status=status,
+        )
+        db.add(message)
+        db.commit()
+        db.refresh(message)
+        return message
+    except Exception:  # noqa: BLE001  兜底写入失败不能掩盖原始问题
+        db.rollback()
+        return None
+    finally:
+        db.close()
+
+
+def _persist_interrupted(conversation_id: uuid.UUID, parts: list[str]) -> None:
+    """客户端断开时保存已生成的部分内容，避免会话里只有提问没有回答。"""
+    content = "".join(parts).strip() or "回答生成中断，请重试。"
+    _save_assistant_message(conversation_id, content, MESSAGE_STATUS_FAILED)
+
+
 def stream_answer(
-    db: Session,
-    conversation: Conversation,
-    collection: Collection,
+    conversation_id: uuid.UUID,
+    collection_id: uuid.UUID,
     question: str,
     history: list[Message],
     document_scope: list[uuid.UUID] | None = None,
 ) -> Iterator[dict]:
-    """流式回答：先检索，再逐段产出正文，最后落库并发送引用。"""
-    start = time.perf_counter()
-    embedding_config = _resolve_embedding_config(db, collection)
-    chat_config = _resolve_chat_config(db, collection)
-    queries = plan_queries(question, history, chat_config)
-    scope_ids, scope_explicit = _resolve_document_scope(
-        db, collection, question, document_scope
-    )
-    rerank_config = _resolve_rerank_config(db, collection)
-    agent = DocumentQAAgent(
-        db,
-        collection,
-        embedding_config,
-        scope_ids,
-        rerank_config=rerank_config,
-        rerank_query=question,
-        chat_config=chat_config,
-    )
-    tool_stats = {"tool_rounds": 0, "retrieval_calls": 0}
-    coverage: list[bool] = []
-    retrieval_ms = 0.0
-    answer_ms = 0.0
+    """流式回答：检索用短会话，模型生成期间不占用数据库连接。
 
-    def trace(
-        status: str, *, cited: list[str] | None = None, error: str | None = None
-    ) -> None:
-        log_retrieval_trace(
-            conversation,
-            collection,
-            agent,
-            query_count=len(queries),
-            tool_rounds=tool_stats["tool_rounds"],
-            tool_retrieval_calls=tool_stats["retrieval_calls"],
-            tool_fallback=tool_stats.get("fallback", 0) == 1,
-            document_filter_active=scope_ids is not None,
-            document_filter_count=len(scope_ids or []),
-            document_scope_explicit=scope_explicit,
-            rerank_model=rerank_config.rerank_model if rerank_config else "",
-            rerank_fallback=agent.rerank_fallback,
-            rerank_ms=agent.rerank_ms,
-            sub_question_coverage=coverage,
-            chat_config=chat_config,
-            retrieval_ms=retrieval_ms,
-            answer_ms=answer_ms,
-            status=status,
-            cited_chunk_ids=cited or [],
-            error=error,
-        )
-
-    yield {"event": "status", "data": {"stage": "retrieval"}}
-    try:
-        tool_stats, executed = _run_tool_loop(
-            agent, chat_config, question, history, queries
-        )
-        for query_index, query in enumerate(queries):
-            if _normalize_query(query) not in executed:
-                agent.search_documents(query, query_index=query_index)
-        agent.select_evidence()
-        _expand_evidence(agent, chat_config, question)
-        coverage = agent.coverage(len(queries))
-        retrieval_ms = (time.perf_counter() - start) * 1000
-    except AppError as exc:
-        trace("failed", error=exc.code)
-        yield {"event": "error", "data": {"code": exc.code, "message": exc.message}}
-        return
-    except Exception:  # noqa: BLE001  流式响应必须把失败转成事件
-        trace("failed", error="INTERNAL_ERROR")
-        yield {
-            "event": "error",
-            "data": {"code": "INTERNAL_ERROR", "message": "检索失败，请稍后重试"},
-        }
-        return
-
-    if not agent.evidence:
-        result = _save_insufficient(db, conversation)
-        trace(MESSAGE_STATUS_INSUFFICIENT)
-        yield {
-            "event": "done",
-            "data": {"assistant_message": _message_payload(result.message, [])},
-        }
-        return
-
-    sub_question_note = ""
-    if len(queries) > 1:
-        coverage_lines = ["\n需要分别回答的子问题："]
-        for index, item in enumerate(queries):
-            state = (
-                "有片段进入上下文"
-                if coverage[index]
-                else "没有片段进入上下文，请说明无法确认"
-            )
-            coverage_lines.append(f"- {item}（{state}）")
-        sub_question_note = "\n".join(coverage_lines)
-
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                f"以下是从当前资料集中检索到的片段：\n\n{agent.build_context()}\n\n"
-                f"问题：{question}{sub_question_note}\n\n"
-                "请依据资料回答，并使用 [编号] 标注引用。"
-            ),
-        },
-    ]
-
-    yield {"event": "status", "data": {"stage": "answering"}}
-    answer_start = time.perf_counter()
+    检索完成后主动关闭会话，再逐段产出正文；落库使用新的短会话。
+    这样并发问答不会长期占用连接池。客户端断开（GeneratorExit）时
+    用独立会话保存已生成的内容，避免出现“有提问、无回答”的孤儿消息。
+    """
     parts: list[str] = []
+    persisted = False
+    db: Session | None = SessionLocal()
     try:
-        spec = model_provider.get_provider_spec(chat_config.provider_key)
-        api_key = decrypt_secret(
-            chat_config.api_key_ciphertext, chat_config.key_version
+        conversation = db.get(Conversation, conversation_id)
+        collection = db.get(Collection, collection_id)
+        if conversation is None or collection is None:
+            yield {
+                "event": "error",
+                "data": {"code": "NOT_FOUND", "message": "会话不存在"},
+            }
+            return
+
+        start = time.perf_counter()
+        embedding_config = _resolve_embedding_config(db, collection)
+        chat_config = _resolve_chat_config(db, collection)
+        queries = plan_queries(question, history, chat_config)
+        scope_ids, scope_explicit = _resolve_document_scope(
+            db, collection, question, document_scope
         )
-        # 答案生成固定温度 0：同一问题、同一上下文应产出同样的结论与格式。
-        for delta in model_provider.chat_completion_stream(
-            spec, api_key, chat_config.chat_model, messages, temperature=0.0
-        ):
-            parts.append(delta)
-            yield {"event": "delta", "data": {"text": delta}}
-    except AppError as exc:
-        _save_failed(db, conversation)
-        answer_ms = (time.perf_counter() - answer_start) * 1000
-        trace("failed", error=exc.code)
-        yield {"event": "error", "data": {"code": exc.code, "message": exc.message}}
-        return
-    except Exception:  # noqa: BLE001
-        _save_failed(db, conversation)
-        answer_ms = (time.perf_counter() - answer_start) * 1000
-        trace("failed", error="INTERNAL_ERROR")
-        yield {
-            "event": "error",
-            "data": {"code": "INTERNAL_ERROR", "message": "回答生成失败，请稍后重试"},
-        }
-        return
-    answer_ms = (time.perf_counter() - answer_start) * 1000
+        rerank_config = _resolve_rerank_config(db, collection)
+        agent = DocumentQAAgent(
+            db,
+            collection,
+            embedding_config,
+            scope_ids,
+            rerank_config=rerank_config,
+            rerank_query=question,
+            chat_config=chat_config,
+        )
+        tool_stats = {"tool_rounds": 0, "retrieval_calls": 0}
+        coverage: list[bool] = []
+        retrieval_ms = 0.0
+        answer_ms = 0.0
 
-    cleaned, used = validate_citations("".join(parts), len(agent.evidence))
-    if not cleaned:
-        _save_failed(db, conversation)
-        trace("failed", error="EMPTY_ANSWER")
-        yield {
-            "event": "error",
-            "data": {"code": "CONVERSATION_FAILED", "message": "回答生成失败，请稍后重试"},
-        }
-        return
-
-    status = (
-        MESSAGE_STATUS_INSUFFICIENT
-        if "当前资料无法确认" in cleaned and not used
-        else MESSAGE_STATUS_COMPLETED
-    )
-    if status == MESSAGE_STATUS_COMPLETED and not used:
-        cleaned = f"{cleaned}{UNCITED_WARNING}"
-
-    assistant = Message(
-        conversation_id=conversation.id,
-        role=MESSAGE_ROLE_ASSISTANT,
-        content=cleaned,
-        status=status,
-    )
-    db.add(assistant)
-    db.flush()
-
-    citations: list[Citation] = []
-    for index in used:
-        item = agent.evidence[index - 1]
-        citations.append(
-            Citation(
-                message_id=assistant.id,
-                chunk_id=item.chunk.id,
-                document_id=item.document.id,
-                marker_index=index,
-                document_name=item.document.filename,
-                source_location=source_location(item.chunk),
-                quote_snapshot=item.chunk.text,
+        def trace(
+            status: str, *, cited: list[str] | None = None, error: str | None = None
+        ) -> None:
+            log_retrieval_trace(
+                conversation,
+                collection,
+                agent,
+                query_count=len(queries),
+                tool_rounds=tool_stats["tool_rounds"],
+                tool_retrieval_calls=tool_stats["retrieval_calls"],
+                tool_fallback=tool_stats.get("fallback", 0) == 1,
+                document_filter_active=scope_ids is not None,
+                document_filter_count=len(scope_ids or []),
+                document_scope_explicit=scope_explicit,
+                rerank_model=rerank_config.rerank_model if rerank_config else "",
+                rerank_fallback=agent.rerank_fallback,
+                rerank_ms=agent.rerank_ms,
+                sub_question_coverage=coverage,
+                chat_config=chat_config,
+                retrieval_ms=retrieval_ms,
+                answer_ms=answer_ms,
+                status=status,
+                cited_chunk_ids=cited or [],
+                error=error,
             )
-        )
-    db.add_all(citations)
-    db.commit()
-    db.refresh(assistant)
 
-    trace(status, cited=agent.cited_chunk_ids(used))
-    yield {
-        "event": "done",
-        "data": {"assistant_message": _message_payload(assistant, citations)},
-    }
+        yield {"event": "status", "data": {"stage": "retrieval"}}
+        try:
+            tool_stats, executed = _run_tool_loop(
+                agent, chat_config, question, history, queries
+            )
+            for query_index, query in enumerate(queries):
+                if _normalize_query(query) not in executed:
+                    agent.search_documents(query, query_index=query_index)
+            agent.select_evidence()
+            _expand_evidence(agent, chat_config, question)
+            coverage = agent.coverage(len(queries))
+            retrieval_ms = (time.perf_counter() - start) * 1000
+        except AppError as exc:
+            _save_assistant_message(
+                conversation_id, "检索失败，请稍后重试。", MESSAGE_STATUS_FAILED
+            )
+            persisted = True
+            trace("failed", error=exc.code)
+            yield {"event": "error", "data": {"code": exc.code, "message": exc.message}}
+            return
+        except Exception:  # noqa: BLE001  流式响应必须把失败转成事件
+            _save_assistant_message(
+                conversation_id, "检索失败，请稍后重试。", MESSAGE_STATUS_FAILED
+            )
+            persisted = True
+            trace("failed", error="INTERNAL_ERROR")
+            yield {
+                "event": "error",
+                "data": {"code": "INTERNAL_ERROR", "message": "检索失败，请稍后重试"},
+            }
+            return
+
+        if not agent.evidence:
+            result = _save_insufficient(db, conversation)
+            persisted = True
+            trace(MESSAGE_STATUS_INSUFFICIENT)
+            yield {
+                "event": "done",
+                "data": {"assistant_message": _message_payload(result.message, [])},
+            }
+            return
+
+        sub_question_note = ""
+        if len(queries) > 1:
+            coverage_lines = ["\n需要分别回答的子问题："]
+            for index, item in enumerate(queries):
+                state = (
+                    "有片段进入上下文"
+                    if coverage[index]
+                    else "没有片段进入上下文，请说明无法确认"
+                )
+                coverage_lines.append(f"- {item}（{state}）")
+            sub_question_note = "\n".join(coverage_lines)
+
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            *_history_messages(history),
+            {
+                "role": "user",
+                "content": (
+                    f"以下是从当前资料集中检索到的片段：\n\n{agent.build_context()}\n\n"
+                    f"问题：{question}{sub_question_note}\n\n"
+                    "请依据资料回答，并使用 [编号] 标注引用。"
+                ),
+            },
+        ]
+
+        # 检索已结束，先释放连接再调用模型；后续只用已加载的普通属性。
+        db.close()
+        db = None
+
+        yield {"event": "status", "data": {"stage": "answering"}}
+        answer_start = time.perf_counter()
+        try:
+            spec = model_provider.get_provider_spec(chat_config.provider_key)
+            api_key = decrypt_secret(
+                chat_config.api_key_ciphertext, chat_config.key_version
+            )
+            # 答案生成固定温度 0：同一问题、同一上下文应产出同样的结论与格式。
+            for delta in model_provider.chat_completion_stream(
+                spec, api_key, chat_config.chat_model, messages, temperature=0.0
+            ):
+                parts.append(delta)
+                yield {"event": "delta", "data": {"text": delta}}
+        except AppError as exc:
+            _save_assistant_message(
+                conversation_id, "回答生成失败，请稍后重试。", MESSAGE_STATUS_FAILED
+            )
+            persisted = True
+            answer_ms = (time.perf_counter() - answer_start) * 1000
+            trace("failed", error=exc.code)
+            yield {"event": "error", "data": {"code": exc.code, "message": exc.message}}
+            return
+        except Exception:  # noqa: BLE001
+            _save_assistant_message(
+                conversation_id, "回答生成失败，请稍后重试。", MESSAGE_STATUS_FAILED
+            )
+            persisted = True
+            answer_ms = (time.perf_counter() - answer_start) * 1000
+            trace("failed", error="INTERNAL_ERROR")
+            yield {
+                "event": "error",
+                "data": {"code": "INTERNAL_ERROR", "message": "回答生成失败，请稍后重试"},
+            }
+            return
+        answer_ms = (time.perf_counter() - answer_start) * 1000
+
+        cleaned, used = validate_citations("".join(parts), len(agent.evidence))
+        if not cleaned:
+            _save_assistant_message(
+                conversation_id, "回答生成失败，请稍后重试。", MESSAGE_STATUS_FAILED
+            )
+            persisted = True
+            trace("failed", error="EMPTY_ANSWER")
+            yield {
+                "event": "error",
+                "data": {
+                    "code": "CONVERSATION_FAILED",
+                    "message": "回答生成失败，请稍后重试",
+                },
+            }
+            return
+
+        status = (
+            MESSAGE_STATUS_INSUFFICIENT
+            if "当前资料无法确认" in cleaned and not used
+            else MESSAGE_STATUS_COMPLETED
+        )
+        if status == MESSAGE_STATUS_COMPLETED and not used:
+            cleaned = f"{cleaned}{UNCITED_WARNING}"
+
+        db = SessionLocal()
+        assistant = Message(
+            conversation_id=conversation_id,
+            role=MESSAGE_ROLE_ASSISTANT,
+            content=cleaned,
+            status=status,
+        )
+        db.add(assistant)
+        db.flush()
+
+        citations: list[Citation] = []
+        for index in used:
+            item = agent.evidence[index - 1]
+            citations.append(
+                Citation(
+                    message_id=assistant.id,
+                    chunk_id=item.chunk.id,
+                    document_id=item.document.id,
+                    marker_index=index,
+                    document_name=item.document.filename,
+                    source_location=source_location(item.chunk),
+                    quote_snapshot=item.chunk.text,
+                )
+            )
+        db.add_all(citations)
+        db.commit()
+        db.refresh(assistant)
+        payload = _message_payload(assistant, citations)
+        db.close()
+        db = None
+        persisted = True
+
+        trace(status, cited=agent.cited_chunk_ids(used))
+        yield {"event": "done", "data": {"assistant_message": payload}}
+    except GeneratorExit:
+        if not persisted:
+            _persist_interrupted(conversation_id, parts)
+        raise
+    finally:
+        if db is not None:
+            db.close()
 
 
 def answer_question(
@@ -493,6 +591,7 @@ def answer_question(
             chat_config,
             [
                 {"role": "system", "content": SYSTEM_PROMPT},
+                *_history_messages(history),
                 {
                     "role": "user",
                     "content": (

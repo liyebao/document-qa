@@ -28,6 +28,24 @@ def estimate_tokens(text: str) -> int:
     return cjk + latin + punctuation // 2
 
 
+def _slice_by_token_budget(text: str, target_tokens: int) -> list[str]:
+    """按估算 token 数切片，而不是把 target_tokens 直接当字符数用。
+
+    中英文混排时字符数与 token 数比例不同；用当前文本的比例换算切分步长，
+    避免英文长句被切得比目标短 5–6 倍。
+    """
+    total = estimate_tokens(text)
+    if total <= target_tokens:
+        return [text]
+    step = max(1, int(len(text) * target_tokens / max(total, 1)))
+    pieces = []
+    for index in range(0, len(text), step):
+        piece = text[index : index + step].strip()
+        if piece:
+            pieces.append(piece)
+    return pieces
+
+
 def _split_long_text(text: str, target_tokens: int) -> list[str]:
     if estimate_tokens(text) <= target_tokens:
         return [text]
@@ -41,10 +59,7 @@ def _split_long_text(text: str, target_tokens: int) -> list[str]:
             pieces.append(current.strip())
             current = ""
         if estimate_tokens(sentence) > target_tokens:
-            for index in range(0, len(sentence), target_tokens):
-                piece = sentence[index : index + target_tokens].strip()
-                if piece:
-                    pieces.append(piece)
+            pieces.extend(_slice_by_token_budget(sentence, target_tokens))
             continue
         current += sentence
     if current.strip():
@@ -118,7 +133,7 @@ def chunk_blocks(
                 chunks.append(_make_chunk(buffer, len(chunks)))
                 buffer = []
             elif (
-                _buffer_tokens(buffer) >= min_tokens
+                buffer
                 and _buffer_tokens(buffer) + estimate_tokens(block.text) > target_tokens
             ):
                 chunks.append(_make_chunk(buffer, len(chunks)))

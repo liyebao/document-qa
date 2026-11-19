@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Uuid, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -10,6 +10,10 @@ from app.db.base import Base
 
 class Chunk(Base):
     __tablename__ = "chunks"
+    # 同一文档的 ordinal 必须唯一：并发重试/锁回收重跑时靠它阻止重复片段落库。
+    __table_args__ = (
+        Index("uq_chunks_document_ordinal", "document_id", "ordinal", unique=True),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     document_id: Mapped[uuid.UUID] = mapped_column(

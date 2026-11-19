@@ -26,7 +26,8 @@ def tokenize(text: str) -> list[str]:
     tokens: list[str] = []
     for raw in jieba.cut_for_search(text):
         term = raw.strip().lower()
-        if len(term) < 2 or term in _STOPWORDS:
+        # 单字通常噪声太大，但“第5章”里的 5 是精确匹配的关键，单独保留数字。
+        if (len(term) < 2 and not term.isdigit()) or term in _STOPWORDS:
             continue
         if not (_CJK.search(term) or _LATIN_TERM.fullmatch(term)):
             continue

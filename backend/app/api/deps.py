@@ -5,7 +5,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
-from app.core.ratelimit import ask_limiter, reindex_limiter, upload_limiter
+from app.core.ratelimit import (
+    ask_limiter,
+    reindex_limiter,
+    settings_limiter,
+    upload_limiter,
+)
 from app.db.session import get_db
 from app.models.collection import Collection
 from app.models.conversation import Conversation
@@ -29,6 +34,11 @@ def upload_rate_limit(user: User = Depends(get_current_user)) -> None:
 
 def reindex_rate_limit(user: User = Depends(get_current_user)) -> None:
     reindex_limiter.hit(f"reindex:{user.id}")
+
+
+def settings_rate_limit(user: User = Depends(get_current_user)) -> None:
+    """模型配置写接口与连接测试共用独立配额，不占用问答额度。"""
+    settings_limiter.hit(f"settings:{user.id}")
 
 
 def require_collection(

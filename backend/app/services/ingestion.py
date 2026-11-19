@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -36,6 +36,10 @@ from app.services.retrieval.tokenizer import tokenize
 from app.services.sources import build_markdown_filename, fetch_page
 
 logger = logging.getLogger(__name__)
+
+# 批量写入大小：chunk 行和倒排词行分开控制，避免单条 SQL/单次 commit 过大。
+_CHUNK_INSERT_BATCH = 200
+_TERM_INSERT_BATCH = 2000
 
 
 def _checksum(content: bytes) -> str:
@@ -386,12 +390,22 @@ def set_document_enabled(db: Session, document: Document, enabled: bool) -> Docu
 
 
 def retry_document(db: Session, document: Document) -> Document:
-    """仅允许重试处理失败的文件，避免重复写入已成功的片段。"""
-    if document.status != DOCUMENT_STATUS_FAILED:
-        raise AppError("DOCUMENT_NOT_FAILED", "只有处理失败的文件可以重试", 409)
-    document.status = DOCUMENT_STATUS_PROCESSING
-    document.failure_reason = None
+    """仅允许重试处理失败的文件，避免重复写入已成功的片段。
+
+    用条件更新做 CAS：两个并发“重试”只有一个能把 failed 改成 processing，
+    另一个拿到 0 行直接返回 409，不会同时跑两遍入库。
+    """
+    result = db.execute(
+        update(Document)
+        .where(
+            Document.id == document.id,
+            Document.status == DOCUMENT_STATUS_FAILED,
+        )
+        .values(status=DOCUMENT_STATUS_PROCESSING, failure_reason=None)
+    )
     db.commit()
+    if not result.rowcount:
+        raise AppError("DOCUMENT_NOT_FAILED", "只有处理失败的文件可以重试", 409)
     db.refresh(document)
     return document
 
@@ -529,7 +543,7 @@ def _ingest_document(db: Session, document_id: uuid.UUID) -> None:
     if not path.exists():
         raise FileNotFoundError(document.storage_path)
 
-    blocks = parse_document(document.format, path.read_bytes())
+    blocks = parse_document(document.format, path)
     chunks = chunk_blocks(
         blocks,
         target_tokens=settings.chunk_target_tokens,
@@ -561,30 +575,45 @@ def _ingest_document(db: Session, document_id: uuid.UUID) -> None:
     collection.embedding_provider = config.provider_key
     collection.embedding_model = config.embedding_model
 
-    for chunk, vector in zip(chunks, vectors, strict=True):
-        terms = Counter(tokenize(chunk.search_text))
-        chunk_id = uuid.uuid4()
-        db.add(
-            Chunk(
-                id=chunk_id,
-                document_id=document.id,
-                fingerprint=chunk.fingerprint,
-                ordinal=chunk.ordinal,
-                text=chunk.text,
-                heading_path=chunk.heading_path,
-                page_start=chunk.page_start,
-                page_end=chunk.page_end,
-                search_text=chunk.search_text,
-                token_count=sum(terms.values()),
-                embedding=vector,
+    # 幂等：重试/并发重跑前先清掉该文档已有片段，避免叠加出重复索引。
+    db.execute(delete(Chunk).where(Chunk.document_id == document.id))
+
+    # 分批写入：大文档的 chunk_terms 可能几万行，一次性 add 会把整批对象压在
+    # 内存里并让事务一直开着；Core executemany + 分批 commit 更稳。
+    for start in range(0, len(chunks), _CHUNK_INSERT_BATCH):
+        chunk_batch = chunks[start : start + _CHUNK_INSERT_BATCH]
+        vector_batch = vectors[start : start + _CHUNK_INSERT_BATCH]
+        chunk_rows: list[dict] = []
+        term_rows: list[dict] = []
+        for chunk, vector in zip(chunk_batch, vector_batch, strict=True):
+            terms = Counter(tokenize(chunk.search_text))
+            chunk_id = uuid.uuid4()
+            chunk_rows.append(
+                {
+                    "id": chunk_id,
+                    "document_id": document.id,
+                    "fingerprint": chunk.fingerprint,
+                    "ordinal": chunk.ordinal,
+                    "text": chunk.text,
+                    "heading_path": chunk.heading_path,
+                    "page_start": chunk.page_start,
+                    "page_end": chunk.page_end,
+                    "search_text": chunk.search_text,
+                    "token_count": sum(terms.values()),
+                    "embedding": vector,
+                }
             )
-        )
-        db.add_all(
-            [
-                ChunkTerm(chunk_id=chunk_id, term=term, tf=count)
+            term_rows.extend(
+                {"chunk_id": chunk_id, "term": term, "tf": count}
                 for term, count in terms.items()
-            ]
-        )
+            )
+        db.execute(insert(Chunk.__table__), chunk_rows)
+        for term_start in range(0, len(term_rows), _TERM_INSERT_BATCH):
+            db.execute(
+                insert(ChunkTerm.__table__),
+                term_rows[term_start : term_start + _TERM_INSERT_BATCH],
+            )
+        db.commit()
 
     document.status = DOCUMENT_STATUS_READY
     document.failure_reason = None

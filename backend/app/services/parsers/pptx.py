@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 
 from pptx import Presentation
 
@@ -21,9 +22,9 @@ def _shape_lines(shape) -> list[str]:
     return lines
 
 
-def parse_pptx(data: bytes) -> list[TextBlock]:
+def parse_pptx(data: bytes | Path) -> list[TextBlock]:
     try:
-        presentation = Presentation(BytesIO(data))
+        presentation = Presentation(BytesIO(data) if isinstance(data, bytes) else data)
     except Exception as exc:  # noqa: BLE001
         raise ParseError("PPTX 文件损坏或格式不正确") from exc
 

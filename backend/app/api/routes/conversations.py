@@ -59,27 +59,35 @@ def create_message_stream(
     db: Session = Depends(get_db),
     _: None = Depends(ask_rate_limit),
 ) -> StreamingResponse:
-    """SSE 流式回答；事件依次为 status / delta / done 或 error。"""
+    """SSE 流式回答；事件依次为 status / delta / done 或 error。
+
+    用户提问与标题在这里用请求会话写完即提交，流内只传 id 和已加载的数据，
+    避免整个生成过程占着数据库连接。
+    """
     collection = collections.get_collection_or_error(db, conversation.collection_id, user)
     user_message, history = conversations.start_question(
         db, conversation, collection, payload.content
     )
+    conversations.rename_conversation_from_question(db, conversation, user_message)
+
+    conversation_id = conversation.id
+    collection_id = collection.id
+    question = user_message.content
+    document_ids = payload.document_ids
+    user_payload = MessageOut.model_validate(user_message).model_dump(mode="json")
 
     def event_stream():
         try:
             for item in answering.stream_answer(
-                db,
-                conversation,
-                collection,
-                user_message.content,
+                conversation_id,
+                collection_id,
+                question,
                 history,
-                payload.document_ids,
+                document_ids,
             ):
                 data = item["data"]
                 if item["event"] == "done":
-                    data["user_message"] = MessageOut.model_validate(
-                        user_message
-                    ).model_dump(mode="json")
+                    data["user_message"] = user_payload
                 payload_data = json.dumps(data, ensure_ascii=False)
                 yield f"event: {item['event']}\ndata: {payload_data}\n\n"
         except AppError as exc:
@@ -93,10 +101,6 @@ def create_message_stream(
                 ensure_ascii=False,
             )
             yield f"event: error\ndata: {payload_data}\n\n"
-        finally:
-            conversations.rename_conversation_from_question(
-                db, conversation, user_message
-            )
 
     return StreamingResponse(
         event_stream(),
