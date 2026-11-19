@@ -98,7 +98,7 @@ export function SourceImport({ busy, onCreateText, onImportUrl }: Props) {
             <button
               type="submit"
               disabled={busy}
-              className="btn-accent h-8 shrink-0 px-3 text-[11px]"
+              className="btn-accent min-h-11 shrink-0 px-3 text-[11px]"
             >
               {busy ? "处理中…" : mode === "text" ? "文本入库" : "抓取并入库"}
             </button>

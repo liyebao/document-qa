@@ -33,6 +33,7 @@ export async function sendMessageStream(
   content: string,
   documentIds: string[] | undefined,
   handlers: StreamHandlers,
+  options: { signal?: AbortSignal } = {},
 ): Promise<void> {
   const payload: { content: string; document_ids?: string[] } = { content };
   if (documentIds && documentIds.length > 0) {
@@ -46,6 +47,7 @@ export async function sendMessageStream(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       credentials: "include",
+      signal: options.signal,
     },
   );
 
@@ -65,6 +67,9 @@ export async function sendMessageStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  // 只有收到 done 或 error 才算正常结束；连接被中途掐断时抛错，
+  // 让界面清掉 pending 消息并重新拉取会话，而不是残留假消息。
+  let finished = false;
 
   function consume(block: string) {
     const parsed = parseEvent(block);
@@ -78,8 +83,10 @@ export async function sendMessageStream(
           handlers.onDelta(data.text);
         }
       } else if (parsed.event === "done") {
+        finished = true;
         handlers.onDone(JSON.parse(parsed.data) as MessageExchange);
       } else if (parsed.event === "error") {
+        finished = true;
         const data = JSON.parse(parsed.data) as { message?: string };
         handlers.onError(data.message ?? "回答失败，请稍后重试");
       }
@@ -107,5 +114,9 @@ export async function sendMessageStream(
     }
   } finally {
     reader.releaseLock();
+  }
+
+  if (!finished) {
+    throw new ApiError(0, "STREAM_INTERRUPTED", "连接中断，请重试");
   }
 }

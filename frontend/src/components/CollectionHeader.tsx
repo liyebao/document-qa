@@ -49,7 +49,7 @@ export function CollectionHeader({
               type="button"
               onClick={onReindex}
               disabled={reindexing}
-              className="btn-ghost min-h-9 px-3 text-xs"
+              className="btn-ghost min-h-11 px-3 text-xs"
             >
               {reindexing ? "重建中…" : "重建索引 ↻"}
             </button>
@@ -57,7 +57,7 @@ export function CollectionHeader({
           <button
             type="button"
             onClick={onRename}
-            className="btn-ghost min-h-9 px-3 text-xs"
+            className="btn-ghost min-h-11 px-3 text-xs"
           >
             重命名 ↗
           </button>

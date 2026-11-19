@@ -18,7 +18,7 @@ export function ConversationSection({ conversations, onCreate, onDelete }: Props
         <button
           type="button"
           onClick={onCreate}
-          className="btn-primary min-h-9 px-3 text-xs"
+          className="btn-primary min-h-11 px-3 text-xs"
         >
           新建会话 →
         </button>

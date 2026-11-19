@@ -5,14 +5,14 @@ export default {
     extend: {
       colors: {
         paper: {
-          DEFAULT: "#F6F8FC",
+          DEFAULT: "#FFFFFF",
           card: "#FFFFFF",
           deep: "#EEF2F8",
         },
         ink: {
           DEFAULT: "#172033",
           soft: "#4B5870",
-          mute: "#71809A",
+          mute: "#5B6B84",
           line: "#E1E7F0",
         },
         accent: {

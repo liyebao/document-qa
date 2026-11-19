@@ -97,11 +97,32 @@ export function CollectionPage() {
     }
     setUploading(true);
     setError(null);
-    try {
-      for (const file of Array.from(files)) {
-        await uploadDocument(collectionId, file);
+    const queue = Array.from(files);
+    const failures: File[] = [];
+    // 限并发 3 个：既比串行快，又不会一次把上传限流打满。
+    const worker = async () => {
+      while (queue.length > 0) {
+        const file = queue.shift();
+        if (!file) {
+          return;
+        }
+        try {
+          await uploadDocument(collectionId, file);
+        } catch {
+          failures.push(file);
+        }
       }
+    };
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(3, queue.length) }, () => worker()),
+      );
       await refreshDocuments();
+      if (failures.length > 0) {
+        setError(
+          `${failures.length} 个文件上传失败：${failures.map((item) => item.name).join("、")}`,
+        );
+      }
     } catch (err) {
       setError(errorMessage(err));
     } finally {

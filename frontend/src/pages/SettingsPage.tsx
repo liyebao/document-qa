@@ -39,17 +39,16 @@ export function SettingsPage() {
     void load();
   }, [refresh]);
 
-  // 提示条自动消失，不需要用户手动关闭；文本变化会重新计时。
+  // 成功提示自动消失；错误必须保留，避免用户还没读完服务商返回的原因就消失。
   useEffect(() => {
-    if (!notice && !error) {
+    if (!notice) {
       return;
     }
     const timer = window.setTimeout(() => {
       setNotice(null);
-      setError(null);
     }, NOTICE_AUTO_CLOSE_MS);
     return () => window.clearTimeout(timer);
-  }, [notice, error]);
+  }, [notice]);
 
   async function handleRoleChange(role: "embedding" | "chat", configId: string) {
     setBusy(true);

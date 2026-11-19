@@ -36,7 +36,7 @@ export function DocumentSection({
           <h2 className="text-lg font-semibold text-ink">文件</h2>
           <p className="mt-1 text-sm text-ink-mute">导入资料并查看处理状态</p>
         </div>
-        <label className="btn-primary min-h-9 cursor-pointer px-3 text-xs">
+        <label className="btn-primary min-h-11 cursor-pointer px-3 text-xs">
           {uploading ? "上传中…" : "＋ 添加文件"}
           <input
             type="file"

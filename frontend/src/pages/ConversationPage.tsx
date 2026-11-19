@@ -27,6 +27,7 @@ export function ConversationPage() {
   const [streamText, setStreamText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   // 只有用户停留在底部时才自动跟随；上翻查看历史时不抢滚动位置。
   const stickToBottom = useRef(true);
   // 流式增量先攒在 ref 里，按帧合并成一次 state 更新，避免每个 token 都全量重渲染。
@@ -90,6 +91,7 @@ export function ConversationPage() {
       if (streamFrame.current !== null) {
         window.cancelAnimationFrame(streamFrame.current);
       }
+      abortRef.current?.abort();
     };
   }, []);
 
@@ -136,33 +138,42 @@ export function ConversationPage() {
       current ? { ...current, messages: [...current.messages, pendingMessage] } : current,
     );
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      await sendMessageStream(conversationId, content, scopeIds, {
-        onDelta: appendDelta,
-        onDone: ({ user_message, assistant_message }) => {
-          setConversation((current) =>
-            current
-              ? {
-                  ...current,
-                  messages: [
-                    ...current.messages.map((message) =>
-                      message.id === pendingId ? user_message : message,
-                    ),
-                    assistant_message,
-                  ],
-                }
-              : current,
-          );
-          resetStream();
+      await sendMessageStream(
+        conversationId,
+        content,
+        scopeIds,
+        {
+          onDelta: appendDelta,
+          onDone: ({ user_message, assistant_message }) => {
+            setConversation((current) =>
+              current
+                ? {
+                    ...current,
+                    messages: [
+                      ...current.messages.map((message) =>
+                        message.id === pendingId ? user_message : message,
+                      ),
+                      assistant_message,
+                    ],
+                  }
+                : current,
+            );
+            resetStream();
+          },
+          onError: (message) => {
+            setError(message);
+            resetStream();
+            void getConversation(conversationId)
+              .then(setConversation)
+              .catch(() => undefined);
+          },
         },
-        onError: (message) => {
-          setError(message);
-          resetStream();
-          void getConversation(conversationId)
-            .then(setConversation)
-            .catch(() => undefined);
-        },
-      });
+        { signal: controller.signal },
+      );
     } catch (err) {
       setConversation((current) =>
         current
@@ -172,11 +183,25 @@ export function ConversationPage() {
             }
           : current,
       );
-      setError(errorMessage(err));
-      setQuestion(content);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // 用户主动停止：后端会保存已生成的部分，重新拉取即可看到。
+        setError("已停止生成");
+        void getConversation(conversationId)
+          .then(setConversation)
+          .catch(() => undefined);
+      } else {
+        setError(errorMessage(err));
+        setQuestion(content);
+      }
     } finally {
+      abortRef.current = null;
       setSending(false);
+      resetStream();
     }
+  }
+
+  function stopStream() {
+    abortRef.current?.abort();
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -358,16 +383,27 @@ export function ConversationPage() {
             onKeyDown={handleKeyDown}
             rows={2}
             maxLength={4000}
+            aria-label="提问内容"
             placeholder="围绕当前资料集提问…"
-            className="min-h-[56px] flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-6 text-ink outline-none placeholder:text-ink-mute/80"
+            className="min-h-[56px] flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-6 text-ink outline-none placeholder:text-ink-mute"
           />
-          <button
-            type="submit"
-            disabled={sending || !question.trim()}
-            className="btn-primary min-h-10 shrink-0 px-5"
-          >
-            {sending ? "回答中…" : "发送"}
-          </button>
+          {sending ? (
+            <button
+              type="button"
+              onClick={stopStream}
+              className="min-h-10 shrink-0 rounded-full border border-ink-line px-5 text-sm font-medium text-ink-soft transition hover:border-vermilion/40 hover:text-vermilion"
+            >
+              停止生成
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!question.trim()}
+              className="btn-primary min-h-10 shrink-0 px-5"
+            >
+              发送
+            </button>
+          )}
         </div>
         <p className="mt-2 flex items-center justify-between gap-3 px-1 text-xs text-ink-mute">
           <span className="truncate">Enter 发送 · Shift + Enter 换行</span>

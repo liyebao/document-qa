@@ -12,6 +12,10 @@
     background-image: none;
   }
 
+  p {
+    text-wrap: pretty;
+  }
+
   ::selection {
     background-color: #4f46e5;
     color: #ffffff;
@@ -44,7 +48,7 @@
 
 @layer components {
   .field {
-    @apply w-full rounded-lg border border-ink-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition duration-200 ease-out placeholder:text-ink-mute/80 focus:border-accent focus:ring-4 focus:ring-accent/10;
+    @apply w-full rounded-lg border border-ink-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition duration-200 ease-out placeholder:text-ink-mute focus:border-accent focus:ring-4 focus:ring-accent/10;
   }
 
   .field-select {
@@ -54,7 +58,7 @@
   }
 
   .btn {
-    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition duration-200 ease-out disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition duration-200 ease-out disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .btn-primary {
@@ -86,17 +90,7 @@
   }
 
   .row-action {
-    @apply inline-flex min-h-9 items-center rounded-lg px-2.5 text-xs font-medium text-ink-soft transition hover:bg-accent-wash hover:text-accent;
-  }
-
-  .hairline-grid {
-    background-image: linear-gradient(
-        to right,
-        rgba(27, 25, 21, 0.06) 1px,
-        transparent 1px
-      ),
-      linear-gradient(to bottom, rgba(27, 25, 21, 0.06) 1px, transparent 1px);
-    background-size: 32px 32px;
+    @apply inline-flex min-h-11 items-center rounded-lg px-2.5 text-xs font-medium text-ink-soft transition hover:bg-accent-wash hover:text-accent;
   }
 }
 
@@ -158,7 +152,7 @@
 
 .hljs-meta,
 .hljs-tag {
-  color: #71809a;
+  color: #5b6b84;
 }
 
 .hljs-deletion {

@@ -146,7 +146,7 @@ export function CollectionsPage() {
                   type="button"
                   onClick={() => void handleDelete(item)}
                   aria-label={`删除资料集 ${item.name}`}
-                  className="rounded-lg px-2.5 py-2 text-xs font-medium text-ink-mute transition hover:bg-vermilion-wash hover:text-vermilion"
+                  className="inline-flex min-h-11 items-center rounded-lg px-2.5 text-xs font-medium text-ink-mute transition hover:bg-vermilion-wash hover:text-vermilion"
                 >
                   删除
                 </button>
