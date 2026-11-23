@@ -1,7 +1,9 @@
 import hashlib
 import logging
 import re
+import struct
 import uuid
+import zipfile
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -124,7 +126,11 @@ def create_document(
     fetched_at: datetime | None = None,
 ) -> Document:
     if not filename:
-        raise AppError("UNSUPPORTED_FORMAT", "仅支持 PDF、DOCX、Markdown 等文本型文件", 415)
+        raise AppError(
+            "UNSUPPORTED_FORMAT",
+            f"文件名为空；仅支持 {storage.SUPPORTED_FORMATS_LABEL} 文件",
+            415,
+        )
     safe_name, file_format = _validate_upload(filename, content)
     checksum = _checksum(content)
     if _find_duplicate(db, collection.id, checksum) is not None:
@@ -173,7 +179,11 @@ def _store_streamed(
     不会留下无法被数据库引用的残文件。
     """
     if not filename:
-        raise AppError("UNSUPPORTED_FORMAT", "仅支持 PDF、DOCX、Markdown 等文本型文件", 415)
+        raise AppError(
+            "UNSUPPORTED_FORMAT",
+            f"文件名为空；仅支持 {storage.SUPPORTED_FORMATS_LABEL} 文件",
+            415,
+        )
     safe_name, file_format = storage.detect_format(filename)
     limit = get_settings().max_upload_mb * 1024 * 1024
     staging = storage.build_storage_path(collection.id, uuid.uuid4(), "uploading")
@@ -268,7 +278,11 @@ def replace_document(
     if not document.is_current:
         raise AppError("DOCUMENT_NOT_CURRENT", "只能替换当前版本的文件", 409)
     if not filename:
-        raise AppError("UNSUPPORTED_FORMAT", "仅支持 PDF、DOCX、Markdown 等文本型文件", 415)
+        raise AppError(
+            "UNSUPPORTED_FORMAT",
+            f"文件名为空；仅支持 {storage.SUPPORTED_FORMATS_LABEL} 文件",
+            415,
+        )
     safe_name, file_format = _validate_upload(filename, content)
     checksum = _checksum(content)
     if _find_duplicate(db, document.collection_id, checksum) is not None:
@@ -486,6 +500,13 @@ def _safe_failure(exc: Exception) -> str:
         return str(exc)[:500]
     if isinstance(exc, FileNotFoundError):
         return "上传文件不存在，请重新上传"
+    # 畸形文件常让解析器漏出结构化异常（截断记录、越界解包、坏 zip）。
+    # 统一文案会把这些压成「解析失败」而丢掉了唯一可定位的线索，
+    # 因此单独给一条带异常类型的提示。
+    if isinstance(
+        exc, struct.error | IndexError | KeyError | UnicodeDecodeError | zipfile.BadZipFile
+    ):
+        return f"文件结构损坏，解析失败（{type(exc).__name__}）"
     return "文件解析或索引失败，请检查文件内容后重试"
 
 

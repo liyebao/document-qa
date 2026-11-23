@@ -37,11 +37,27 @@ def _schedule_ingestion(
 _MEDIA_TYPES = {
     "pdf": "application/pdf",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "doc": "application/msword",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "ppt": "application/vnd.ms-powerpoint",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "xls": "application/vnd.ms-excel",
+    "csv": "text/plain; charset=utf-8",
     "md": "text/plain; charset=utf-8",
     "txt": "text/plain; charset=utf-8",
+    "epub": "application/epub+zip",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "gif": "image/gif",
+    "tiff": "image/tiff",
+    "bmp": "image/bmp",
 }
+
+# 上传的 HTML 是不可信内容：以 text/html 同源 inline 返回等于在本站执行任意脚本，
+# 因此只能降级为纯文本、以附件方式下载；需要预览时应走前端自己的净化渲染。
+_DOWNLOAD_ONLY_FORMATS = {"html"}
 
 
 @router.post(
@@ -144,11 +160,15 @@ def get_document_file(document: Document = Depends(require_document)) -> FileRes
     path = Path(document.storage_path)
     if not path.is_file():
         raise AppError("NOT_FOUND", "原文件不存在或已被清理", 404)
+    download_only = document.format in _DOWNLOAD_ONLY_FORMATS
+    media_type = _MEDIA_TYPES.get(document.format, "application/octet-stream")
+    if download_only:
+        media_type = "text/plain; charset=utf-8"
     return FileResponse(
         path,
-        media_type=_MEDIA_TYPES.get(document.format, "application/octet-stream"),
+        media_type=media_type,
         filename=document.filename,
-        content_disposition_type="inline",
+        content_disposition_type="attachment" if download_only else "inline",
         headers={"Cache-Control": "private, max-age=60"},
     )
 

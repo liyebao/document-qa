@@ -9,7 +9,7 @@ _PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
 def parse_txt(data: bytes | Path) -> list[TextBlock]:
     raw = data if isinstance(data, bytes) else data.read_bytes()
     text: str | None = None
-    for encoding in ("utf-8-sig", "gbk"):
+    for encoding in ("utf-8-sig", "gb18030"):
         try:
             text = raw.decode(encoding)
             break

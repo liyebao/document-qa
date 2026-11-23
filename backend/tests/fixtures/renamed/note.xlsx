@@ -1,0 +1,2 @@
+这其实是一份纯 UTF-8 文本，只是被改名成 note.xlsx。
+上传时应被 storage.validate_content_file 以 415 拒绝：XLSX 必须是含 xl/workbook.xml 的 zip。

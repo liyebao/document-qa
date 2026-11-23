@@ -9,7 +9,7 @@
 
 ## 1. 项目目标与设计原则
 
-本项目为用户提供一个可追溯的多文件资料问答 Web 原型。用户上传 PDF、DOCX 或 Markdown 文件，在资料集中提问；系统从用户有权访问的文件片段中检索证据，生成带原文引用的回答。资料中没有足够依据时，系统明确说明无法确认。
+本项目为用户提供一个可追溯的多文件资料问答 Web 原型。用户把资料以三种方式放进资料集：上传文件（PDF、DOCX/DOC、PPTX/PPT、XLSX/XLS、CSV、Markdown、TXT、HTML、EPUB 与 PNG/JPEG/WebP/GIF/TIFF/BMP 图片）、粘贴纯文本（存为 `.txt`，以标题作为文件名）、或导入网页链接（抓取正文后存为 `.md`）。随后在资料集中提问；系统从用户有权访问的文件片段中检索证据，生成带原文引用的回答。资料中没有足够依据时，系统明确说明无法确认。
 
 设计遵循以下原则：
 
@@ -17,7 +17,7 @@
 2. **检索要兼顾语义和精确词项。** 语义检索帮助找到意思相近的段落；关键词检索帮助命中名称、编号、术语和原句。
 3. **回答必须可回溯。** 每条引用都关联实际片段、文件和页码/章节。
 4. **权限在检索前生效。** 查询只在当前用户和所选资料集范围内执行。
-5. **先实现可评测的简单链路。** MVP 不加入生产级集群、消息队列、语义缓存、多 Agent 或 OCR。
+5. **先实现可评测的简单链路。** MVP 不加入生产级集群、消息队列、语义缓存、多 Agent 或 OCR；图片可以上传，但只记录尺寸、色彩模式等元信息，不识别图片内的文字。
 
 ## 2. 总体架构
 
@@ -47,7 +47,7 @@ flowchart LR
 | 数据库 | PostgreSQL、pgvector | 结构化数据、向量检索、trigram 子串检索和引用关系 |
 | ORM/驱动 | SQLAlchemy、Psycopg | 数据模型和数据库访问 |
 | 运行模式 | 本地单用户 | 自动复用本机用户，不做账号认证 |
-| 文件解析 | pypdf、python-docx、Markdown 文本解析 | 提取文本及页码/标题等位置 |
+| 文件解析 | pypdf、python-docx、python-pptx、openpyxl、trafilatura、自研 OLE2/CFB 读取器（DOC/PPT/XLS）、标准库 zipfile+XML（EPUB）、csv、Pillow（仅图片元信息） | 提取文本及页码/标题等位置 |
 | 模型服务 | 用户在前端配置的 Embedding 与聊天模型 API | 片段向量化、问题改写和回答生成 |
 
 具体版本沿用前文确定的技术栈清单；具体服务商和模型名称仍需结合 API 预算、中文效果和服务商的数据条款决定。
@@ -89,20 +89,45 @@ sequenceDiagram
 
 **处理规则：**
 
-- 只接收 PRD 约定的 PDF、DOCX、Markdown；首期不承诺扫描件 OCR、图片、音视频或复杂表格解析。
+- 只接收受支持后缀且内容校验通过的文件；音视频、压缩包、可执行文件仍会被 415 拒绝。扫描件 OCR 不在首期范围内，图片可以入库但只保存元信息。
+- 扩展名只用来选择解析器，不能作为信任依据：PDF 必须含 `%PDF-` 头；DOC/PPT/XLS 必须是 OLE2 复合文档（魔数 `D0CF11E0A1B11AE1`）；DOCX/PPTX/XLSX/EPUB 必须是含对应内部路径的 zip；图片必须匹配真实文件头；文本类必须能按 UTF-8 或 GBK 解码。只把扩展名改成受支持格式的文件会在这一步被拦住。
 - 先提取文本，再检查是否为空；空文本、损坏文件或解析失败的文件不得进入检索索引。
 - 文件记录先处于处理中；只有片段和索引完整写入后才标记为可检索，避免用户查到半成品。
 - 更新文件时先完成新版本解析与索引，再切换可检索版本；失败时保留原可用版本并报告失败。
-- 删除或停用文件后，它不再参与新问题的检索；历史回答保留当时引用文字和来源位置快照。替换成功或软删除时删除旧片段，引用快照不受影响。引用同时保存 `document_id`，前端可打开原始文件；PDF 使用 `#page=N` 跳到引用页，DOCX 由浏览器下载，Markdown 显示原文。
+- 删除或停用文件后，它不再参与新问题的检索；历史回答保留当时引用文字和来源位置快照。替换成功或软删除时删除旧片段，引用快照不受影响。引用同时保存 `document_id`，前端可打开原始文件：PDF 用 `#page=N` 跳到引用页，图片与纯文本类内联预览，DOC/DOCX/PPT/PPTX/XLS/XLSX/EPUB 由浏览器下载，HTML 强制以附件下载（原始标记不可信，避免同源脚本执行）。
 - 上传时按文件内容计算 SHA-256；资料集内检测到相同内容时提示重复，不重复创建片段和向量。
 - 首期替换文件时整份重新解析、建索引并切换版本；片段级增量更新等数据量变大后再评估。
 - 应用启动时把上次进程中断遗留的 `processing` 文件标记为 `failed` 并提示重试，避免永久停在处理中。
+
+**支持的上传格式与解析方式（与 `backend/app/services/storage.py`、`backend/app/services/parsers/` 一致）：**
+
+| 后缀 | 解析实现 | 位置信息 |
+|---|---|---|
+| `pdf` | pypdf 逐页 `extract_text()`，只取纯文本 | `page` 为 PDF 物理页号；`heading_path` 由「第X章／一、／1.2／附录」等编号文本启发式填充，无编号版式为空 |
+| `docx` | python-docx 读段落与表格 | 按 `Heading N`／`标题 N` 样式维护标题路径 |
+| `doc` | 自研 OLE2 读取 `WordDocument` + `1Table`/`0Table`，按 FIB 与片段表取正文 | 按分页符切页，编号型标题填充 `heading_path`；仅支持 Word 97 及以上 |
+| `pptx` | python-pptx 逐页取文本框、表格与备注 | `page` 为幻灯片序号，`heading_path` 为标题占位符 |
+| `ppt` | 自研 OLE2 读取 `PowerPoint Document` 流，展开文本原子记录 | 按标题占位符分页，`page` 为记录出现顺序 |
+| `xlsx` | openpyxl（`read_only`、`data_only`）逐表读单元格 | `heading_path` 为工作表名，内容转 Markdown 表格 |
+| `xls` | 自研 OLE2 + BIFF8 记录（`BOUNDSHEET`／`SST`／`LABELSST`／`RK`／`FORMULA` 等） | 同上；仅支持 BIFF8（97-2003），更早版本提示另存为 `.xlsx` |
+| `csv` | `csv.Sniffer` 判定分隔符后按行转 Markdown 表格 | 无标题路径 |
+| `md`/`markdown` | 按 `#` 层级切块 | 标题路径 |
+| `txt` | 按空行分段 | 无标题路径 |
+| `html`/`htm` | trafilatura 抽正文为 Markdown（与网页导入同一套参数），失败时退回标准库 `HTMLParser` 块级切分 | 标题路径来自 `h1`–`h6`／标题标记 |
+| `epub` | 解 zip → `META-INF/container.xml` → OPF `spine` 顺序逐章抽取 | 标题路径为「书名 > 章节名」，无页码 |
+| `png`/`jpg`/`jpeg`/`webp`/`gif`/`tiff`/`bmp` | Pillow 读取格式、像素、色彩模式，不识别文字 | 无文本内容，`heading_path` 为空 |
+
+**上传 HTML 与「网页导入」的关系：**上传 `.html` 保存的是原始文件，检索时由 `parse_html` 抽取正文；`POST /api/collections/{id}/documents/url` 是后端抓取网页后立刻用同一套 trafilatura 参数抽正文，只把正文存成 `.md`。两者共用抽取参数，因此同一条链接用两种方式导入得到的检索结果一致；区别是前者保留原始标记、可下载核对，后者只保存清洗后的正文。为避免同源脚本执行，`.html` 原文件只以附件形式下载，不在浏览器内直接渲染。
 
 ### 3.2 切片与来源定位
 
 按标题、段落和句子边界递归切片，尽量保持一个片段表达完整的小主题。片段应保留文件 ID、片段顺序、标题路径及页码/章节等元数据。将标题路径作为片段检索文本的前缀，帮助脱离上下文的片段保留主题信息；MVP 不为每个片段额外调用 LLM 生成说明。
 
-**初始调参建议：**片段目标长度约 600–900 tokens，相邻片段重叠约 10%；简单表格转为可读文本，复杂表格不承诺准确解析。该参数是起始值，不是固定标准，最终需在本项目资料和评测集上比较。PDF 会识别“第X章/节、一、、（一）、1.2、附录”等编号型标题并保留页码，标题路径跨页继承；没有编号、只靠字号区分的版式仍只有页码。DOCX、PPTX 和 Markdown 保留标题层级及段落顺序。
+**初始调参建议：**片段目标长度约 600–900 tokens，相邻片段重叠约 10%；表格统一转成 Markdown 表格文本，复杂合并单元格仍不承诺还原。该参数是起始值，不是固定标准，最终需在本项目资料和评测集上比较。
+
+**PDF 的实际行为（如实说明）：**PDF 走的是「按页取纯文本」，不是结构感知解析。`pypdf` 的 `extract_text()` 返回一页的字符流，其中没有字号、样式、分栏等版式信息；解析器只在这段文本上按空行分段、按「第X章/节、一、、（一）、1.2、附录」等**编号文本模式**切块，所以一页通常对应多个 `TextBlock`，`page` 一律取 PDF 物理页号。`heading_path` 由这些编号文本推导并跨页继承，因此**有编号标题的 PDF 才有标题路径**；只靠字号区分层级的 PDF 拿不到标题，只剩页码。扫描件或纯图层 PDF 提取不到字符，直接以「未从 PDF 中提取到文本，可能是扫描件或空文件」失败，不会产生空片段。中文 PDF 常见的字符间空格（如「体 系 结 构」）会保留在文本里，属于源文件编码问题，不做额外修补。
+
+**其他格式：**DOCX、PPTX、Markdown、HTML、EPUB 保留标题层级及段落顺序；DOC/PPT 由编号文本与标题占位符推导标题路径；XLS/XLSX/CSV 以工作表名或首行表头作为上下文；图片不产生文本，只记录格式、像素与色彩模式。
 
 **索引策略：**片段向量列允许不同资料集使用不同维度，因此不能直接建单一 HNSW 索引。迁移按 768/1024/1536/3072 维建立部分表达式 HNSW 索引（3072 维用 halfvec），查询端只在维度命中时使用对应表达式并附加 `vector_dims` 条件，其他维度退化为精确扫描。关键词召回以 BM25 为主：入库时用 jieba 分词写入 `chunk_terms` 倒排表（词频 `tf`）和 `chunks.token_count`（文档长度），查询时按标准 BM25（k1=1.5、b=0.75）计算 IDF 与归一化分数。BM25 零命中时（专有名词被切碎、纯符号等）回退到 `ILIKE '%词%'` 子串匹配，该回退路径由 `pg_trgm` GIN 索引加速。
 
@@ -198,7 +223,7 @@ erDiagram
 1. **本地用户与归属：**首次启动创建/复用本机用户，所有资源按本地用户归属校验。
 2. **资料集管理：**新建、重命名、删除资料集和列表展示。
 3. **文件管理：**上传校验、状态查询、停用/删除、版本和解析失败信息。
-4. **解析与索引：**PDF/DOCX/Markdown 正文提取、来源定位、切片、Embedding、关键词索引。
+4. **解析与索引：**PDF/DOCX/DOC/PPTX/PPT/XLSX/XLS/CSV/Markdown/TXT/HTML/EPUB 正文提取（图片仅记录元信息）、来源定位、切片、Embedding、关键词索引。
 5. **检索编排：**权限过滤、语义检索、关键词检索、RRF 去重和候选排序。
 6. **问答 Agent：**会话上下文、证据约束回答、引用校验、证据不足处理。
 7. **评测与日志：**记录检索候选、引用、耗时与失败原因；支持离线评测集运行。
@@ -215,8 +240,13 @@ erDiagram
 | `GET /api/collections` | 获取当前用户资料集 |
 | `POST /api/collections` | 创建资料集 |
 | `DELETE /api/collections/{id}` | 删除资料集 |
-| `POST /api/collections/{id}/documents` | 上传文件 |
+| `POST /api/collections/{id}/documents` | 上传文件（PDF/DOCX/DOC/PPTX/PPT/XLSX/XLS/CSV/Markdown/TXT/HTML/EPUB/图片） |
+| `POST /api/collections/{id}/documents/text` | 粘贴纯文本，保存为 `.txt`，文件名取标题 |
+| `POST /api/collections/{id}/documents/url` | 导入网页链接，抓取正文后保存为 `.md` |
 | `GET /api/collections/{id}/documents` | 查询文件与处理状态 |
+| `GET /api/documents/{id}/file` | 返回原文件：PDF/图片/文本内联，Office/EPUB/HTML 下载 |
+| `POST /api/documents/{id}/retry` | 重新解析失败的文件 |
+| `POST /api/documents/{id}/replace` | 用新文件替换当前版本 |
 | `DELETE /api/documents/{id}` | 软删除文件并从未来检索中排除，保留历史引用快照 |
 | `POST /api/collections/{id}/conversations` | 创建会话 |
 | `POST /api/conversations/{id}/messages` | 提问并返回回答与引用 |
@@ -286,7 +316,7 @@ erDiagram
 
 - 本地单用户模式和资源归属校验。
 - 设置页管理用户自己的模型 API Key、测试连接和模型选择。
-- 资料集、PDF/DOCX/Markdown 上传及解析状态。
+- 资料集与三种入口（上传文件、粘贴文本、导入网页）；受支持格式覆盖 PDF/DOCX/DOC、PPTX/PPT、XLSX/XLS/CSV、Markdown/TXT、HTML、EPUB 与常见图片，上传后展示解析状态。
 - 带来源位置的切片与索引。
 - 语义 + 关键词混合检索、RRF 融合。
 - 同会话追问改写、复合问题分项检索。

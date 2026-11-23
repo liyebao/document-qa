@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 
 from app.core.errors import AppError
-from app.core.secrets import decrypt_secret
+from app.core.secrets import read_secret
 from app.models.message import Message
 from app.models.model_provider_config import ModelProviderConfig
 from app.services import model_provider
@@ -63,8 +63,12 @@ def looks_followup(question: str) -> bool:
     return any(marker in text for marker in _FOLLOW_UP_MARKERS)
 
 
+# 用户可能直接用文件名指代资料，扩展名列表需与 storage 支持的上传格式保持一致。
 _FILE_EXTENSION_PATTERN = re.compile(
-    r"[\w\u4e00-\u9fff.\-]+\.(?:pdf|docx|md|markdown)(?![a-zA-Z0-9])",
+    r"[\w\u4e00-\u9fff.\-]+\.(?:pdf|docx|doc|pptx|ppt|xlsx|xls|csv|md|markdown|txt"
+    # 扩展名后面必须是一个词边界：否则「如何导入.csv文件」里的「导入.csv」会被
+    # 当成点名了一个不存在的文件，把整个检索范围清空。
+    r"|html|htm|epub|png|jpg|jpeg|webp|gif|tiff|bmp)(?![A-Za-z0-9_\u4e00-\u9fff])",
     re.IGNORECASE,
 )
 
@@ -90,8 +94,12 @@ def extract_document_ids(
             matched.append(document_id)
     if matched:
         return matched
-    if _FILE_EXTENSION_PATTERN.search(question):
-        return []
+    for match in _FILE_EXTENSION_PATTERN.finditer(question):
+        # 与上面的正向匹配用同一门槛：主干不足 4 个字符时无法与通用词区分，
+        # 例如「如何导入.csv文件」「这个.epub打不开」里的「导入.csv」「这个.epub」
+        # 不应被当成点名了一个不存在的文件——那会直接把检索结果清空。
+        if len(Path(match.group(0)).stem) >= 4:
+            return []
     return None
 
 
@@ -146,7 +154,7 @@ def plan_queries(
     )
     try:
         spec = model_provider.get_provider_spec(config.provider_key)
-        api_key = decrypt_secret(config.api_key_ciphertext, config.key_version)
+        api_key = read_secret(config.api_key_ciphertext, config.key_version)
         raw = model_provider.chat_completion(
             spec,
             api_key,

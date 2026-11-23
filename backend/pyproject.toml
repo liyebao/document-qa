@@ -26,6 +26,8 @@ dependencies = [
     "python-pptx==1.0.2",
     "openpyxl==3.1.5",
     "trafilatura==2.3.1",
+    # 图片上传只读取尺寸/色彩模式等元信息（无 OCR），用 Pillow 统一判定真实格式。
+    "pillow==13.0.0",
     "jieba==0.42.1",
 ]
 
