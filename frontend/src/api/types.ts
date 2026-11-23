@@ -122,6 +122,13 @@ export interface ConversationSummary {
   created_at: string;
 }
 
+export interface ConversationListItem extends ConversationSummary {
+  /** 所属资料集名称，侧边栏「最近」用来标明上下文。 */
+  collection_name: string;
+  /** 最近活动时间（最后一条消息时间，没有消息时等于 created_at）。 */
+  updated_at: string;
+}
+
 export interface ConversationDetail extends ConversationSummary {
   messages: Message[];
 }

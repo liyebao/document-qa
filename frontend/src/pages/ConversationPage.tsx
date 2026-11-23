@@ -12,6 +12,7 @@ import { getConversation, sendMessageStream } from "../api/conversations";
 import { listDocuments } from "../api/documents";
 import type { ConversationDetail, DocumentItem, Message } from "../api/types";
 import { ChatMessage } from "../components/ChatMessage";
+import { notifyConversationsChanged } from "../app/recent";
 
 export function ConversationPage() {
   const params = useParams<{ conversationId: string }>();
@@ -163,6 +164,8 @@ export function ConversationPage() {
                 : current,
             );
             resetStream();
+            // 首问后后端会按问题内容改会话标题，通知侧边栏刷新「最近」里的名字。
+            notifyConversationsChanged();
           },
           onError: (message) => {
             setError(message);
@@ -234,7 +237,7 @@ export function ConversationPage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col">
+    <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col px-3 pt-3 sm:px-6 sm:pt-4">
       {/* 紧凑标题栏：与主流对话应用一致，只保留返回、标题和范围入口。 */}
       <div className="mx-auto flex w-full max-w-3xl shrink-0 items-start gap-3 border-b border-ink-line pb-3">
         <div className="min-w-0 flex-1">
@@ -312,7 +315,7 @@ export function ConversationPage() {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="mx-auto min-h-0 w-full max-w-3xl flex-1 space-y-8 overflow-y-auto py-4 pr-1"
+        className="mx-auto min-h-0 w-full max-w-3xl flex-1 space-y-8 overflow-y-auto py-6 pr-1"
       >
         {error && (
           <p
@@ -324,7 +327,7 @@ export function ConversationPage() {
         )}
 
         {conversation.messages.length === 0 ? (
-          <div className="flex min-h-[50vh] flex-col items-center justify-center text-center">
+          <div className="flex h-full min-h-[46vh] flex-col items-center justify-center text-center">
             <span
               aria-hidden="true"
               className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-wash text-2xl font-bold text-accent"
@@ -372,45 +375,51 @@ export function ConversationPage() {
         )}
       </div>
 
-      <form
-        onSubmit={handleSubmit}
-        className="mx-auto w-full max-w-3xl shrink-0 border-t border-ink-line pt-3"
+      {/* 输入框固定在主区域底部：滚动只发生在消息区，输入区不随内容移动。 */}
+      <div
+        className="shrink-0 border-t border-ink-line bg-paper/95 backdrop-blur"
+        // iOS 上避免输入条被 Home 指示条压住；桌面端 env() 取 0，不会多出空隙。
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <div className="flex items-end gap-2 rounded-2xl border border-ink-line bg-white p-2 shadow-lift focus-within:border-accent/40">
-          <textarea
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={2}
-            maxLength={4000}
-            aria-label="提问内容"
-            placeholder="围绕当前资料集提问…"
-            className="min-h-[56px] flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-6 text-ink outline-none placeholder:text-ink-mute"
-          />
-          {sending ? (
-            <button
-              type="button"
-              onClick={stopStream}
-              className="min-h-10 shrink-0 rounded-full border border-ink-line px-5 text-sm font-medium text-ink-soft transition hover:border-vermilion/40 hover:text-vermilion"
-            >
-              停止生成
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!question.trim()}
-              className="btn-primary min-h-10 shrink-0 px-5"
-            >
-              发送
-            </button>
-          )}
-        </div>
-        <p className="mt-2 flex items-center justify-between gap-3 px-1 text-xs text-ink-mute">
-          <span className="truncate">Enter 发送 · Shift + Enter 换行</span>
-          <span className="hidden shrink-0 sm:inline">回答仅依据本资料集的检索片段</span>
-          <span className="shrink-0 font-mono">{question.length} / 4000</span>
-        </p>
-      </form>
+        <form onSubmit={handleSubmit} className="mx-auto w-full max-w-3xl pb-3 pt-3">
+          <div className="flex items-end gap-2 rounded-2xl border border-ink-line bg-white p-2 shadow-lift transition focus-within:border-accent/40">
+            <textarea
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={2}
+              maxLength={4000}
+              aria-label="提问内容"
+              placeholder="围绕当前资料集提问…"
+              className="min-h-[56px] flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-6 text-ink outline-none placeholder:text-ink-mute"
+            />
+            {sending ? (
+              <button
+                type="button"
+                onClick={stopStream}
+                className="min-h-10 shrink-0 rounded-full border border-ink-line px-5 text-sm font-medium text-ink-soft transition hover:border-vermilion/40 hover:text-vermilion"
+              >
+                停止生成
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!question.trim()}
+                className="btn-primary min-h-10 shrink-0 px-5"
+              >
+                发送
+              </button>
+            )}
+          </div>
+          <p className="mt-2 flex items-center justify-between gap-3 px-1 text-xs text-ink-mute">
+            <span className="truncate">Enter 发送 · Shift + Enter 换行</span>
+            <span className="hidden shrink-0 sm:inline">
+              回答仅依据本资料集的检索片段
+            </span>
+            <span className="shrink-0 font-mono">{question.length} / 4000</span>
+          </p>
+        </form>
+      </div>
     </div>
   );
 }

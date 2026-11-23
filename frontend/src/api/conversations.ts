@@ -1,8 +1,29 @@
 import { API_BASE, ApiError, request } from "./client";
-import type { ConversationDetail, MessageExchange } from "./types";
+import type {
+  ConversationDetail,
+  ConversationListItem,
+  ConversationSummary,
+  MessageExchange,
+} from "./types";
+
+/** 跨资料集的最近会话（侧边栏），一次请求取完，按最近活动时间倒序。 */
+export function listRecentConversations(limit = 30): Promise<ConversationListItem[]> {
+  return request<ConversationListItem[]>(`/conversations?limit=${limit}`);
+}
 
 export function getConversation(id: string): Promise<ConversationDetail> {
   return request<ConversationDetail>(`/conversations/${id}`);
+}
+
+/** 重命名会话：后端返回 ConversationOut（与列表项同构，无消息体）。 */
+export function renameConversation(
+  id: string,
+  title: string,
+): Promise<ConversationSummary> {
+  return request<ConversationSummary>(`/conversations/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
 }
 
 export function deleteConversation(id: string): Promise<void> {

@@ -92,6 +92,43 @@
   .row-action {
     @apply inline-flex min-h-11 items-center rounded-lg px-2.5 text-xs font-medium text-ink-soft transition hover:bg-accent-wash hover:text-accent;
   }
+
+  /*
+   * 跳过导航：平时视觉隐藏（不能 display:none，否则不可聚焦），
+   * 拿到焦点后浮到左上角，避免被侧边栏遮住。
+   */
+  .skip-link {
+    @apply fixed left-3 top-3 z-[70] -translate-y-16 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lift transition-transform duration-200 ease-out;
+  }
+
+  .skip-link:focus-visible {
+    @apply translate-y-0 outline-none ring-2 ring-white/70;
+  }
+
+  /* 折叠态图标栏的 tooltip：用伪元素渲染，带 aria-label 的元素同时具备可读名称。 */
+  .rail-tip {
+    position: relative;
+  }
+
+  .rail-tip::after {
+    content: attr(data-tip);
+    @apply pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-30 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-card transition-opacity duration-150;
+  }
+
+  .rail-tip:hover::after,
+  .rail-tip:focus-visible::after {
+    @apply opacity-100;
+  }
+
+  /*
+   * 长列表降级“虚拟化”：给每个分组声明高度占位，
+   * 让浏览器跳过屏幕外分组的渲染与布局（content-visibility），
+   * 但 DOM 与语义结构完整保留，键盘与读屏都不受影响。
+   */
+  .cv-group {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 220px;
+  }
 }
 
 /* 代码块语法高亮：与项目色板对齐的浅色主题，由 rehype-highlight 输出的 hljs-* 类驱动。 */

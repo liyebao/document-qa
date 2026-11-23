@@ -4,6 +4,30 @@ import type { DocumentItem } from "../api/types";
 import { FileStatus } from "./FileStatus";
 import { SourceImport } from "./SourceImport";
 
+// 与后端 storage._EXTENSION_FORMATS 保持一致，否则用户选不中能被解析的格式。
+const ACCEPTED_FILE_TYPES =
+  ".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.csv,.md,.markdown,.txt,.html,.htm,.epub," +
+  ".png,.jpg,.jpeg,.webp,.gif,.tiff,.bmp";
+
+// 浏览器能直接渲染的格式才提供“查看”，其余（Office、EPUB、HTML、TIFF）只能下载。
+// TIFF 主流浏览器不能内联渲染，放进来只会得到一个白屏或下载。
+const PREVIEWABLE_FORMATS = new Set([
+  "pdf",
+  "md",
+  "txt",
+  "csv",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "bmp",
+]);
+
+function fileActionLabel(format: string): string {
+  return PREVIEWABLE_FORMATS.has(format) ? "查看" : "下载";
+}
+
 interface Props {
   documents: DocumentItem[];
   uploading: boolean;
@@ -41,7 +65,7 @@ export function DocumentSection({
           <input
             type="file"
             multiple
-            accept=".pdf,.docx,.md,.markdown,.txt,.pptx,.xlsx"
+            accept={ACCEPTED_FILE_TYPES}
             onChange={onUpload}
             disabled={uploading}
             className="hidden"
@@ -50,7 +74,8 @@ export function DocumentSection({
       </div>
 
       <p className="mt-3 text-xs leading-5 text-ink-mute">
-        支持 PDF、DOCX、Markdown、TXT、PPTX、XLSX，单份不超过 100
+        支持 PDF、Word（DOCX/DOC）、PowerPoint（PPTX/PPT）、Excel（XLSX/XLS/CSV）、
+        Markdown、TXT、HTML、EPUB 与图片（无 OCR，仅记录尺寸等信息），单份不超过 100
         MB；内容重复的文件会被拒绝。
       </p>
 
@@ -112,9 +137,9 @@ export function DocumentSection({
                   target="_blank"
                   rel="noreferrer"
                   className="row-action"
-                  title={document.format === "docx" ? "下载原文件" : "查看原文件"}
+                  title={`${fileActionLabel(document.format)}原文件`}
                 >
-                  {document.format === "docx" ? "下载" : "查看"}
+                  {fileActionLabel(document.format)}
                 </a>
                 <button
                   type="button"
@@ -127,7 +152,7 @@ export function DocumentSection({
                   替换
                   <input
                     type="file"
-                    accept=".pdf,.docx,.md,.markdown,.txt,.pptx,.xlsx"
+                    accept={ACCEPTED_FILE_TYPES}
                     onChange={(event) => onReplace(document, event)}
                     className="hidden"
                   />

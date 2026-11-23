@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { createCollection, deleteCollection, listCollections } from "../api/collections";
 import { errorMessage } from "../api/client";
 import type { CollectionSummary } from "../api/types";
+import { notifyConversationsChanged } from "../app/recent";
 
 export function CollectionsPage() {
   const [items, setItems] = useState<CollectionSummary[]>([]);
@@ -37,6 +38,7 @@ export function CollectionsPage() {
       await createCollection(name.trim());
       setName("");
       await load();
+      notifyConversationsChanged();
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -51,6 +53,7 @@ export function CollectionsPage() {
     try {
       await deleteCollection(item.id);
       await load();
+      notifyConversationsChanged();
     } catch (err) {
       setError(errorMessage(err));
     }

@@ -20,6 +20,7 @@ import {
   uploadDocument,
 } from "../api/documents";
 import type { CollectionOut, ConversationSummary, DocumentItem } from "../api/types";
+import { notifyConversationsChanged } from "../app/recent";
 import { CollectionHeader } from "../components/CollectionHeader";
 import { ConversationSection } from "../components/ConversationSection";
 import { DocumentSection } from "../components/DocumentSection";
@@ -98,7 +99,8 @@ export function CollectionPage() {
     setUploading(true);
     setError(null);
     const queue = Array.from(files);
-    const failures: File[] = [];
+    // 保存失败原因：只显示文件名的话，415/409/超时 在界面上完全看不出来。
+    const failures: Array<{ file: File; reason: string }> = [];
     // 限并发 3 个：既比串行快，又不会一次把上传限流打满。
     const worker = async () => {
       while (queue.length > 0) {
@@ -108,8 +110,8 @@ export function CollectionPage() {
         }
         try {
           await uploadDocument(collectionId, file);
-        } catch {
-          failures.push(file);
+        } catch (err) {
+          failures.push({ file, reason: errorMessage(err) });
         }
       }
     };
@@ -120,7 +122,9 @@ export function CollectionPage() {
       await refreshDocuments();
       if (failures.length > 0) {
         setError(
-          `${failures.length} 个文件上传失败：${failures.map((item) => item.name).join("、")}`,
+          `${failures.length} 个文件上传失败：${failures
+            .map((item) => `${item.file.name}（${item.reason}）`)
+            .join("、")}`,
         );
       }
     } catch (err) {
@@ -209,6 +213,7 @@ export function CollectionPage() {
   async function handleCreateConversation() {
     try {
       const conversation = await createConversation(collectionId);
+      notifyConversationsChanged();
       navigate(`/conversations/${conversation.id}`);
     } catch (err) {
       setError(errorMessage(err));
@@ -262,6 +267,7 @@ export function CollectionPage() {
     try {
       await deleteConversation(conversation.id);
       setConversations(await listConversations(collectionId));
+      notifyConversationsChanged();
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -311,7 +317,8 @@ export function CollectionPage() {
         </p>
       )}
 
-      <div className="grid items-start gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+      {/* 显式 minmax(0,…) 列宽：否则长文件名会把网格轨道撑宽，窄屏横向被裁掉。 */}
+      <div className="grid min-w-0 grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <DocumentSection
           documents={documents}
           uploading={uploading}

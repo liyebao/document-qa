@@ -77,6 +77,11 @@ export default {
           "0%, 100%": { opacity: "0.25", transform: "translateY(0)" },
           "50%": { opacity: "1", transform: "translateY(-2px)" },
         },
+        // 移动端抽屉从左侧滑入；位移很小，避免整屏横移带来的卡顿感。
+        slideIn: {
+          "0%": { opacity: "0", transform: "translateX(-14px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
         // 自动消失提示条的剩余时间指示；实际时长由行内 animationDuration 控制。
         shrink: {
           "0%": { transform: "scaleX(1)" },
@@ -87,6 +92,7 @@ export default {
         rise: "rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both",
         fade: "fade 380ms ease both",
         blink: "blink 1.2s ease-in-out infinite",
+        "slide-in": "slideIn 240ms cubic-bezier(0.22, 1, 0.36, 1) both",
         shrink: "shrink 1s linear forwards",
       },
       transitionTimingFunction: {

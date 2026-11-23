@@ -4,6 +4,12 @@ const STATUS_META: Record<string, { label: string; dot: string; text: string }> 
   ok: { label: "连接正常", dot: "bg-jade", text: "text-jade" },
   error: { label: "连接失败", dot: "bg-vermilion", text: "text-vermilion" },
   configured: { label: "未测试", dot: "bg-ochre", text: "text-ochre" },
+  // 主密钥轮换后旧密文解不开，需要用户重新填写 API Key
+  key_unreadable: {
+    label: "密钥不可读，请重新填写",
+    dot: "bg-vermilion",
+    text: "text-vermilion",
+  },
 };
 
 interface Props {
