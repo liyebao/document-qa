@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.routes import collections, conversations, documents, settings
+from app.api.routes import collections, conversations, documents, search, settings
 from app.core.config import get_settings
 from app.core.errors import AppError, app_error_handler
 from app.core.logging import configure_logging
@@ -98,6 +98,8 @@ def create_app() -> FastAPI:
     app.include_router(settings.router)
     app.include_router(collections.router)
     app.include_router(documents.router)
+    # /api/search 与其余前缀互不重叠，注册顺序不影响匹配。
+    app.include_router(search.router)
     app.include_router(conversations.router)
 
     @app.get("/api/health", tags=["system"])

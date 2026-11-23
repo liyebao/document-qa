@@ -1,6 +1,7 @@
 import json
+import uuid
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,9 @@ from app.models.conversation import Conversation
 from app.models.user import User
 from app.schemas.conversation import (
     ConversationDetail,
+    ConversationListItem,
+    ConversationOut,
+    ConversationTitleUpdate,
     MessageCreate,
     MessageExchange,
     MessageOut,
@@ -20,12 +24,49 @@ from app.services import answering, collections, conversations
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 
+@router.get("", response_model=list[ConversationListItem])
+def list_recent_conversations(
+    collection_id: uuid.UUID | None = None,
+    q: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[ConversationListItem]:
+    """跨资料集的最近会话（侧边栏用），按最近活动时间倒序。"""
+    rows = conversations.list_recent_conversations(
+        db, user, limit=limit, offset=offset, collection_id=collection_id, keyword=q
+    )
+    return [
+        ConversationListItem(
+            id=conversation.id,
+            collection_id=conversation.collection_id,
+            title=conversation.title,
+            created_at=conversation.created_at,
+            collection_name=collection_name,
+            updated_at=updated_at,
+        )
+        for conversation, collection_name, updated_at in rows
+    ]
+
+
 @router.get("/{conversation_id}", response_model=ConversationDetail)
 def get_conversation(
     conversation: Conversation = Depends(require_conversation),
     db: Session = Depends(get_db),
 ) -> ConversationDetail:
     return conversations.conversation_detail(db, conversation)
+
+
+@router.patch("/{conversation_id}", response_model=ConversationOut)
+def rename_conversation(
+    payload: ConversationTitleUpdate,
+    conversation: Conversation = Depends(require_conversation),
+    db: Session = Depends(get_db),
+) -> ConversationOut:
+    """只改标题；归属校验在 require_conversation 内完成，非本人会话一律 404。"""
+    updated = conversations.rename_conversation(db, conversation, payload.title)
+    return ConversationOut.model_validate(updated)
 
 
 @router.delete("/{conversation_id}", status_code=204)

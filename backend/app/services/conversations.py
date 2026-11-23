@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
@@ -17,6 +18,55 @@ from app.schemas.conversation import (
 )
 from app.services import answering
 from app.services.parsers.base import normalize_text
+
+
+def conversation_activity_column() -> ColumnElement[datetime]:
+    """会话「最近活动时间」：COALESCE(max(messages.created_at), created_at)。
+
+    会话列表与全局搜索共用这一个表达式，避免两处 SQL 各自漂移。相关子查询
+    在数据库内一次算完，不引入 ORM relationship，因此结果条数不会放大查询次数。
+    """
+    last_message_at = (
+        select(func.max(Message.created_at))
+        .where(Message.conversation_id == Conversation.id)
+        .correlate(Conversation)
+        .scalar_subquery()
+    )
+    return func.coalesce(last_message_at, Conversation.created_at)
+
+
+def list_recent_conversations(
+    db: Session,
+    user: User,
+    *,
+    limit: int = 30,
+    offset: int = 0,
+    collection_id: uuid.UUID | None = None,
+    keyword: str | None = None,
+) -> list[tuple[Conversation, str, datetime]]:
+    """跨资料集的「最近会话」：一次 JOIN 取完，供侧边栏使用。
+
+    不使用 ORM relationship 懒加载（模型上没有 relationship），否则 30 条会话
+    会退化成 31 次查询。排序列是 COALESCE(max(messages.created_at), created_at)
+    这个计算列，因此 offset 分页而不是 keyset。
+    """
+    updated_at = conversation_activity_column().label("updated_at")
+    stmt = (
+        select(Conversation, Collection.name, updated_at)
+        .join(Collection, Collection.id == Conversation.collection_id)
+        .where(Conversation.user_id == user.id)
+    )
+    if collection_id is not None:
+        stmt = stmt.where(Conversation.collection_id == collection_id)
+    if keyword:
+        escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        stmt = stmt.where(Conversation.title.ilike(f"%{escaped}%", escape="\\"))
+    stmt = (
+        stmt.order_by(updated_at.desc(), Conversation.id.desc()).limit(limit).offset(offset)
+    )
+    return [
+        (row[0], row[1], row[2]) for row in db.execute(stmt).all()
+    ]
 
 
 def list_conversations(db: Session, collection: Collection) -> list[Conversation]:
@@ -46,6 +96,14 @@ def create_conversation(
 def delete_conversation(db: Session, conversation: Conversation) -> None:
     db.delete(conversation)
     db.commit()
+
+
+def rename_conversation(db: Session, conversation: Conversation, title: str) -> Conversation:
+    """只改标题；消息与引用不受影响（级联关系由数据库外键负责）。"""
+    conversation.title = normalize_text(title)
+    db.commit()
+    db.refresh(conversation)
+    return conversation
 
 
 def _message_out(message: Message, citations: list[Citation]) -> MessageOut:

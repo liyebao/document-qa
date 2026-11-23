@@ -25,6 +25,32 @@ class ConversationOut(BaseModel):
     created_at: datetime
 
 
+class ConversationTitleUpdate(BaseModel):
+    """改名请求：长度按 strip 之后计算，1..200；空串与超长都交给 422。"""
+
+    # 先挡明显异常的请求体，真正的上限以 strip 后的字符数为准。
+    title: str = Field(max_length=2000)
+
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned or len(cleaned) > 200:
+            raise ValueError("标题长度需为 1..200 个字符")
+        return cleaned
+
+
+class ConversationListItem(ConversationOut):
+    """侧边栏「最近会话」列表项：额外带资料集名与最近活动时间。
+
+    时间取 max(messages.created_at) 与 created_at 的较大值，这样刚建好、
+    还没提问的会话排在列表底部而不是被丢弃。
+    """
+
+    collection_name: str
+    updated_at: datetime
+
+
 class CitationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
