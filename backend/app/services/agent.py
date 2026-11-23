@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.core.secrets import decrypt_secret
+from app.core.secrets import read_secret
 from app.models.chunk import Chunk
 from app.models.collection import Collection
 from app.models.document import DOCUMENT_STATUS_READY, Document
@@ -376,7 +376,7 @@ class DocumentQAAgent:
             return dict(self.rerank_scores) or None
 
         spec = model_provider.get_provider_spec(self.rerank_config.provider_key)
-        api_key = decrypt_secret(
+        api_key = read_secret(
             self.rerank_config.api_key_ciphertext, self.rerank_config.key_version
         )
         started = time.perf_counter()
@@ -432,7 +432,7 @@ class DocumentQAAgent:
             return dict(self._judge_scores) or None
 
         spec = model_provider.get_provider_spec(self.chat_config.provider_key)
-        api_key = decrypt_secret(
+        api_key = read_secret(
             self.chat_config.api_key_ciphertext, self.chat_config.key_version
         )
         started = time.perf_counter()
@@ -478,7 +478,7 @@ class DocumentQAAgent:
             for item in self.evidence[:EXPANSION_SOURCE_LIMIT]
         ]
         spec = model_provider.get_provider_spec(chat_config.provider_key)
-        api_key = decrypt_secret(chat_config.api_key_ciphertext, chat_config.key_version)
+        api_key = read_secret(chat_config.api_key_ciphertext, chat_config.key_version)
         try:
             raw = model_provider.chat_completion(
                 spec,

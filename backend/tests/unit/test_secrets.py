@@ -1,6 +1,15 @@
 import base64
 
-from app.core.secrets import decrypt_secret, encrypt_secret, mask_secret, reencrypt_secret
+import pytest
+
+from app.core.errors import AppError
+from app.core.secrets import (
+    decrypt_secret,
+    encrypt_secret,
+    mask_secret,
+    read_secret,
+    reencrypt_secret,
+)
 
 
 def test_encrypt_and_decrypt_roundtrip() -> None:
@@ -37,3 +46,24 @@ def test_reencrypt_secret_moves_to_new_key_and_version() -> None:
     assert rotated_version == 2
     assert rotated != ciphertext
     assert decrypt_secret(rotated, 2, key=new_key) == "sk-rotate"
+
+
+def test_read_secret_reports_unreadable_credential_as_409() -> None:
+    old_key = base64.urlsafe_b64encode(b"z" * 32).decode()
+    ciphertext, key_version = encrypt_secret("sk-lost", key=old_key, key_version=1)
+
+    with pytest.raises(AppError) as excinfo:
+        read_secret(ciphertext, key_version)
+
+    assert excinfo.value.code == "CREDENTIAL_UNREADABLE"
+    assert excinfo.value.status_code == 409
+    assert "重新填写" in excinfo.value.message
+
+
+def test_read_secret_reports_version_mismatch_as_409() -> None:
+    ciphertext, _ = encrypt_secret("sk-current")
+
+    with pytest.raises(AppError) as excinfo:
+        read_secret(ciphertext, 99)
+
+    assert excinfo.value.code == "CREDENTIAL_UNREADABLE"

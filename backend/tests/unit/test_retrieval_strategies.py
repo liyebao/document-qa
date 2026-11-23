@@ -135,7 +135,7 @@ def test_llm_judge_keeps_rrf_order_among_kept(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.services.agent.model_provider.get_provider_spec", lambda _key: object()
     )
-    monkeypatch.setattr("app.services.agent.decrypt_secret", lambda *a, **k: "sk")
+    monkeypatch.setattr("app.services.agent.read_secret", lambda *a, **k: "sk")
     monkeypatch.setattr(
         "app.services.agent.model_provider.chat_completion",
         lambda *a, **k: '{"keep": [1, 3]}',

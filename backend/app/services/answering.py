@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
-from app.core.secrets import decrypt_secret
+from app.core.secrets import read_secret
 from app.db.session import SessionLocal
 from app.models.citation import Citation
 from app.models.collection import Collection
@@ -163,7 +163,7 @@ def _chat(
     max_tokens: int = 1200,
 ) -> str:
     spec = model_provider.get_provider_spec(config.provider_key)
-    api_key = decrypt_secret(config.api_key_ciphertext, config.key_version)
+    api_key = read_secret(config.api_key_ciphertext, config.key_version)
     return model_provider.chat_completion(
         spec,
         api_key,
@@ -409,7 +409,7 @@ def stream_answer(
         answer_start = time.perf_counter()
         try:
             spec = model_provider.get_provider_spec(chat_config.provider_key)
-            api_key = decrypt_secret(
+            api_key = read_secret(
                 chat_config.api_key_ciphertext, chat_config.key_version
             )
             # 答案生成固定温度 0：同一问题、同一上下文应产出同样的结论与格式。

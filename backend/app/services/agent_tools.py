@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.core.secrets import decrypt_secret
+from app.core.secrets import read_secret
 from app.models.message import MESSAGE_ROLE_USER, Message
 from app.models.model_provider_config import ModelProviderConfig
 from app.services import model_provider
@@ -80,7 +80,7 @@ def _chat_with_tools(
     tools: list[dict],
 ) -> dict:
     spec = model_provider.get_provider_spec(config.provider_key)
-    api_key = decrypt_secret(config.api_key_ciphertext, config.key_version)
+    api_key = read_secret(config.api_key_ciphertext, config.key_version)
     return model_provider.chat_with_tools(
         spec,
         api_key,

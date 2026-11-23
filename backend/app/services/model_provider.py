@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.core.secrets import decrypt_secret, encrypt_secret, mask_secret
+from app.core.secrets import decrypt_secret, encrypt_secret, mask_secret, read_secret
 from app.models.model_provider_config import (
     CONFIG_STATUS_CONFIGURED,
     CONFIG_STATUS_ERROR,
@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 # 只重试明确的临时故障：限流、服务端错误、连接层异常。参数类 4xx 立即失败。
 _RETRY_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _RETRY_BACKOFF_SECONDS = (0.5, 2.0, 8.0)
+# Ollama 的思考型模型（qwen3 等）把思考 token 也算进 max_tokens，且不认
+# think=false；实测 qwen3:4b 一次短问答的思考约 600 token，留 1024 余量。
+_OLLAMA_THINKING_HEADROOM = 1024
 
 _client: httpx.Client | None = None
 _client_lock = threading.Lock()
@@ -201,14 +204,18 @@ def serialize_config(
     preferred_embedding: str | None = None,
     preferred_chat: str | None = None,
 ) -> ModelProviderConfigOut:
+    masked = _mask_ciphertext(config.api_key_ciphertext, config.key_version)
+    # 主密钥轮换后旧密文解不开：列表若仍显示“连接正常”，用户只会在提问时撞到 409。
+    # 这里把状态显式标出来，和 /test 返回的 CREDENTIAL_UNREADABLE 保持一致。
+    status = "key_unreadable" if masked == "****" else config.status
     return ModelProviderConfigOut(
         id=config.id,
         provider_key=config.provider_key,
         embedding_model=config.embedding_model,
         chat_model=config.chat_model,
         rerank_model=config.rerank_model or "",
-        status=config.status,
-        key_masked=_mask_ciphertext(config.api_key_ciphertext, config.key_version),
+        status=status,
+        key_masked=masked,
         last_tested_at=config.last_tested_at,
         updated_at=config.updated_at,
         is_embedding_default=config.provider_key == preferred_embedding,
@@ -642,6 +649,12 @@ def _chat_payload(
     else:
         payload["max_tokens"] = max_tokens
         payload["temperature"] = temperature
+        if spec.key == "ollama":
+            # Ollama 的思考型模型（qwen3 等）走 OpenAI 兼容端点时，思考 token 也
+            # 计入 max_tokens，而 think=false / enable_thinking=false 都不被接受
+            # （实测 qwen3:4b 思考约 600 token）。这里追加固定余量，否则证据扩展
+            # 这类 max_tokens=200 的短请求必定拿到空正文。
+            payload["max_tokens"] = max_tokens + _OLLAMA_THINKING_HEADROOM
     # DeepSeek V4 默认开启思考模式；问答不需要长思考，关闭后可避免工具调用限制和额外计费。
     if spec.key == "deepseek":
         payload["thinking"] = {"type": "disabled"}
@@ -829,7 +842,7 @@ def test_connection(
         raise AppError("MODEL_NOT_CONFIGURED", "该服务商没有配置回答模型", 422)
 
     spec = get_provider_spec(config.provider_key)
-    api_key = decrypt_secret(config.api_key_ciphertext, config.key_version)
+    api_key = read_secret(config.api_key_ciphertext, config.key_version)
 
     test_embedding = role in (None, "embedding")
     test_chat = role in (None, "chat")

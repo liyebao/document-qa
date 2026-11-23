@@ -1,11 +1,14 @@
 import base64
+import logging
 import os
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.core.config import get_settings
+from app.core.errors import AppError
 
 _NONCE_SIZE = 12
+logger = logging.getLogger(__name__)
 
 
 def _decode_key(raw: str) -> bytes:
@@ -53,6 +56,28 @@ def decrypt_secret(
     raw = base64.urlsafe_b64decode(ciphertext)
     plaintext = AESGCM(_load_key(key)).decrypt(raw[:_NONCE_SIZE], raw[_NONCE_SIZE:], b"")
     return plaintext.decode("utf-8")
+
+
+def read_secret(ciphertext: str, key_version: int) -> str:
+    """业务侧解密入口：解不开时给出可操作的 409，而不是 500。
+
+    常见成因是 CREDENTIAL_ENCRYPTION_KEY 被替换（或 .env 被覆盖），旧密文
+    已无法还原。此时唯一正确的处理是让用户重新填写并保存该配置，因此这里
+    把 cryptography 的 InvalidTag、版本不一致、base64 损坏统一转成
+    CREDENTIAL_UNREADABLE，避免前端只看到「系统内部错误」。
+    """
+    try:
+        return decrypt_secret(ciphertext, key_version)
+    except Exception as exc:  # noqa: BLE001  解密失败原因对用户没有意义
+        logger.warning(
+            "凭据解密失败，key_version=%s，原因=%s", key_version, type(exc).__name__
+        )
+        raise AppError(
+            "CREDENTIAL_UNREADABLE",
+            "已保存的 API Key 无法解密（主密钥已更换或版本不匹配），"
+            "请在设置页重新填写该模型配置并保存",
+            409,
+        ) from exc
 
 
 def reencrypt_secret(
