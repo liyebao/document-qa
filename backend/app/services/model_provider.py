@@ -186,7 +186,12 @@ def get_provider_spec(provider_key: str) -> ProviderSpec:
     return spec
 
 
-def _mask_ciphertext(ciphertext: str, key_version: int) -> str:
+def _mask_ciphertext(ciphertext: str, key_version: int) -> str | None:
+    """解密并脱敏；解不开时返回 None。
+
+    不能用 "****" 当失败哨兵：`mask_secret` 对长度 ≤ 8 的密钥本就返回 "****"，
+    两者混淆会把一把合法的短密钥误判成「密钥不可读」。
+    """
     try:
         return mask_secret(decrypt_secret(ciphertext, key_version))
     except Exception:  # noqa: BLE001  主密钥变更后仍要能展示配置状态
@@ -195,7 +200,7 @@ def _mask_ciphertext(ciphertext: str, key_version: int) -> str:
             "模型配置密钥解密失败，key_version=%s；请检查 CREDENTIAL_ENCRYPTION_KEY 是否已轮换",
             key_version,
         )
-        return "****"
+        return None
 
 
 def serialize_config(
@@ -204,10 +209,12 @@ def serialize_config(
     preferred_embedding: str | None = None,
     preferred_chat: str | None = None,
 ) -> ModelProviderConfigOut:
-    masked = _mask_ciphertext(config.api_key_ciphertext, config.key_version)
+    decrypted_mask = _mask_ciphertext(config.api_key_ciphertext, config.key_version)
     # 主密钥轮换后旧密文解不开：列表若仍显示“连接正常”，用户只会在提问时撞到 409。
     # 这里把状态显式标出来，和 /test 返回的 CREDENTIAL_UNREADABLE 保持一致。
-    status = "key_unreadable" if masked == "****" else config.status
+    # 注意用 None 判定失败，而非 "****"：短密钥脱敏后本来就是 "****"。
+    status = "key_unreadable" if decrypted_mask is None else config.status
+    masked = decrypted_mask or "****"
     return ModelProviderConfigOut(
         id=config.id,
         provider_key=config.provider_key,
