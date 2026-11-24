@@ -1,5 +1,4 @@
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -18,7 +17,7 @@ from app.schemas.document import (
     TextDocumentCreate,
     UrlDocumentCreate,
 )
-from app.services import ingestion, jobs
+from app.services import ingestion, jobs, storage
 
 router = APIRouter(prefix="/api", tags=["documents"])
 
@@ -157,7 +156,7 @@ def retry_document(
 @router.get("/documents/{document_id}/file")
 def get_document_file(document: Document = Depends(require_document)) -> FileResponse:
     """返回原文件；PDF 可直接在浏览器中打开并跳到指定页。"""
-    path = Path(document.storage_path)
+    path = storage.stored_path(document.storage_path)
     if not path.is_file():
         raise AppError("NOT_FOUND", "原文件不存在或已被清理", 404)
     download_only = document.format in _DOWNLOAD_ONLY_FORMATS

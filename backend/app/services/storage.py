@@ -179,6 +179,30 @@ def build_storage_path(collection_id: uuid.UUID, document_id: uuid.UUID, file_fo
     return get_settings().upload_dir / str(collection_id) / f"{document_id}.{file_format}"
 
 
+def relative_storage_path(
+    collection_id: uuid.UUID, document_id: uuid.UUID, file_format: str
+) -> str:
+    """数据库里只存相对 upload_dir 的路径。
+
+    绝对路径在容器与宿主机之间不通用：容器里是 /app/storage/uploads，Windows
+    本机会把同一个字符串写成 \\app\\storage\\uploads\\. 换运行方式后就再也找不到文件。
+    """
+    return f"{collection_id}/{document_id}.{file_format}"
+
+
+def stored_path(value: str) -> Path:
+    """把数据库里的 storage_path 还原成当前环境的绝对路径。
+
+    新记录是相对路径（<资料集ID>/<文件名>），直接拼 upload_dir。
+    历史记录可能带着别的环境的绝对路径，这类路径 is_file() 必然失败，
+    但末尾两段仍然有效，同样重新拼一次，避免旧数据整体失效。
+    """
+    path = Path(value)
+    if path.is_file():
+        return path
+    return get_settings().upload_dir / path.parent.name / path.name
+
+
 def save_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)

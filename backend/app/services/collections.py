@@ -11,7 +11,7 @@ from app.models.user import User
 from app.schemas.collection import CollectionSummary
 from app.services import embeddings, model_provider
 from app.services.parsers.base import normalize_text
-from app.services.storage import delete_stored_file
+from app.services.storage import delete_stored_file, stored_path
 
 
 def list_collections(db: Session, user: User) -> list[CollectionSummary]:
@@ -69,7 +69,7 @@ def delete_collection(db: Session, collection: Collection) -> None:
     db.delete(collection)
     db.commit()
     for path in paths:
-        delete_stored_file(path)
+        delete_stored_file(str(stored_path(path)))
 
 
 def reindex_collection(

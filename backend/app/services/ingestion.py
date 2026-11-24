@@ -104,7 +104,7 @@ def _new_document(
         checksum=checksum,
         version=version,
         status=DOCUMENT_STATUS_PROCESSING,
-        storage_path=str(path),
+        storage_path=storage.relative_storage_path(collection.id, document_id, file_format),
         source_type=source_type,
         source_url=source_url,
         fetched_at=fetched_at,
@@ -431,7 +431,7 @@ def soft_delete_document(db: Session, document: Document) -> None:
     # 引用快照保留在 citations 中，chunk_id 由外键置空；片段本身可以清理。
     db.execute(delete(Chunk).where(Chunk.document_id == document.id))
     db.commit()
-    storage.delete_stored_file(document.storage_path)
+    storage.delete_stored_file(str(storage.stored_path(document.storage_path)))
 
 
 def mark_stale_documents_failed() -> int:
@@ -560,7 +560,7 @@ def _ingest_document(db: Session, document_id: uuid.UUID) -> None:
     document.failure_reason = None
     db.commit()
 
-    path = Path(document.storage_path)
+    path = storage.stored_path(document.storage_path)
     if not path.exists():
         raise FileNotFoundError(document.storage_path)
 

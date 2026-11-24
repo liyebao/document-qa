@@ -6,7 +6,13 @@ from typing import Literal
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# 宿主机结构是 <项目>/backend/app/core/config.py，项目根在 parents[3]；
+# 容器里是 /app/app/core/config.py，没有 backend 这一层，parents[3] 会落到 /，
+# 使 storage/uploads 这类相对路径解析到容器内非挂载区——重启后文件全部丢失。
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = (
+    _BACKEND_ROOT.parent if _BACKEND_ROOT.name == "backend" else _BACKEND_ROOT
+)
 
 
 class Settings(BaseSettings):
