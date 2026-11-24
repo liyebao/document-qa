@@ -161,8 +161,14 @@ export function SidebarSearch({ onNavigate, inputRef }: SidebarSearchProps) {
           id={inputId}
           ref={setInputRef}
           type="search"
+          name="sidebar-search"
           value={query}
-          autoComplete="off"
+          // Chrome 会无视 autocomplete="off"，把保存的邮箱/账号填进任何文本框。
+          // new-password 是唯一被浏览器当作"绝不自动填充"的取值，配合密码管理器忽略标记使用。
+          autoComplete="new-password"
+          data-lpignore="true"
+          data-1p-ignore="true"
+          spellCheck={false}
           placeholder="搜索对话 / 文件"
           role="combobox"
           aria-expanded={showPanel}
