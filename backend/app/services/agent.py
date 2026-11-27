@@ -515,10 +515,14 @@ class DocumentQAAgent:
     def build_context(self) -> str:
         parts: list[str] = []
         for item in self.evidence:
+            # 章节要带完整层级：只给最后一级时，模型分不清「5.1 用户管理」和
+            # 「5.2 权限管理」，容易把后一节的注意事项并到前一节里。
+            section = item.chunk.heading_path.strip()
+            section_part = f"｜章节：{section}" if section else ""
             parts.append(
                 f"[{item.index}] 片段ID：{item.chunk.id}"
                 f"｜文件：{item.document.filename}"
-                f"｜位置：{source_location(item.chunk)}\n{item.chunk.text}"
+                f"｜位置：{source_location(item.chunk)}{section_part}\n{item.chunk.text}"
             )
         return "\n\n".join(parts)
 

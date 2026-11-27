@@ -52,6 +52,7 @@ def blocks_from_rows(rows: list[list[str]], *, heading_path: str = "") -> list[T
             TextBlock(
                 text=normalize_text(markdown_table(header, [])),
                 heading_path=heading_path,
+                kind="table",
             )
         ]
 
@@ -62,6 +63,7 @@ def blocks_from_rows(rows: list[list[str]], *, heading_path: str = "") -> list[T
             TextBlock(
                 text=normalize_text(markdown_table(header, part)),
                 heading_path=heading_path,
+                kind="table",
             )
         )
     return blocks

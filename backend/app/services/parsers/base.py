@@ -11,6 +11,9 @@ class TextBlock:
     text: str
     page: int | None = None
     heading_path: str = ""
+    #: ``"table"`` 表示这块是 Markdown 表格。表格必须按行切，不能按句子切，
+    #: 否则一行参数会被劈成两半、表头也会跟着丢。
+    kind: str = "text"
 
 
 def normalize_text(text: str) -> str:

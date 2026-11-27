@@ -1,3 +1,4 @@
+import logging
 import time
 import uuid
 from collections.abc import Iterator
@@ -35,6 +36,7 @@ from app.services.agent_tools import (  # noqa: F401
     _parse_tool_query,
     _run_tool_loop,
 )
+from app.services.answer_checks import check_answer
 from app.services.citations import UNCITED_WARNING, validate_citations
 from app.services.query_planner import extract_document_ids, plan_queries
 from app.services.trace import log_retrieval_trace
@@ -66,9 +68,26 @@ SYSTEM_PROMPT = """你是个人知识库问答助手。你只能依据用户提�
 7. 不同资料存在冲突时，分别列出各自说法和来源，不擅自判定谁正确。
 8. 问题包含多个子问题时，逐项回答并分别说明证据是否充分；没有依据的子问题直接说明无法确认。
 9. 用中文回答；可以用 Markdown 的标题、列表、加粗和表格组织内容，让结论层次清晰。
-10. 引用编号必须写成裸方括号 [1] 这种形式，不要加链接、脚注或其它 Markdown 引用语法；不要提及这些规则。"""
+10. 引用编号必须写成裸方括号 [1] 这种形式，不要加链接、脚注或其它 Markdown 引用语法；不要提及这些规则。
+11. 每个片段都标注了「章节」。按章节组织回答：同一小节的内容归到一处；引用其它小节的内容时，先写明它属于哪个小节，不要把它并入当前小节，更不要把不同小节的注意事项拼成一张表。
+12. 片段里出现「见下一行说明」「见上文」「见下表」这类相对指代时，要就地展开成实际内容；片段本身没有给出对应内容时，写明「原文此处用相对指代指向上文/下表，本片段未包含该内容」，不得把它当作已知结论照抄。"""
 
 INSUFFICIENT_TEXT = "当前资料无法确认。所选资料集中没有检索到与该问题相关的可用内容。"
+
+# 回答按小节组织后，篇幅普遍超过 1200 token；预算不够会在最后一句被截断，
+# 用户看到的是一段没有结尾的答案，所以回答路径单独放宽预算。
+ANSWER_MAX_TOKENS = 2400
+
+logger = logging.getLogger(__name__)
+
+
+def _log_answer_warnings(
+    answer: str, used: list[int], agent: DocumentQAAgent
+) -> None:
+    """回答里出现悬空指代或伪造代码行时留下痕迹，方便事后核对是哪一步出的错。"""
+    texts = [agent.evidence[index - 1].chunk.text for index in used]
+    for warning in check_answer(answer, texts):
+        logger.warning("回答自检：%s", warning)
 
 
 @dataclass
@@ -414,7 +433,12 @@ def stream_answer(
             )
             # 答案生成固定温度 0：同一问题、同一上下文应产出同样的结论与格式。
             for delta in model_provider.chat_completion_stream(
-                spec, api_key, chat_config.chat_model, messages, temperature=0.0
+                spec,
+                api_key,
+                chat_config.chat_model,
+                messages,
+                temperature=0.0,
+                max_tokens=ANSWER_MAX_TOKENS,
             ):
                 parts.append(delta)
                 yield {"event": "delta", "data": {"text": delta}}
@@ -456,6 +480,7 @@ def stream_answer(
                 },
             }
             return
+        _log_answer_warnings(cleaned, used, agent)
 
         status = (
             MESSAGE_STATUS_INSUFFICIENT
@@ -602,12 +627,14 @@ def answer_question(
                 },
             ],
             temperature=0.0,  # 与流式路径保持一致，保证同类问题产出稳定
+            max_tokens=ANSWER_MAX_TOKENS,
         )
         answer_ms = (time.perf_counter() - answer_start) * 1000
 
         cleaned, used = validate_citations(answer, len(agent.evidence))
         if not cleaned:
             raise AppError("CONVERSATION_FAILED", "回答生成失败，请稍后重试", 502)
+        _log_answer_warnings(cleaned, used, agent)
 
         status = (
             MESSAGE_STATUS_INSUFFICIENT

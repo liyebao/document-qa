@@ -42,6 +42,8 @@ logger = logging.getLogger(__name__)
 # 批量写入大小：chunk 行和倒排词行分开控制，避免单条 SQL/单次 commit 过大。
 _CHUNK_INSERT_BATCH = 200
 _TERM_INSERT_BATCH = 2000
+# 以「页」为单位的格式：一页一个标题、一个知识点，切块时按标题断开。
+_SLIDE_FORMATS = frozenset({"pptx", "ppt"})
 
 
 def _checksum(content: bytes) -> str:
@@ -570,6 +572,10 @@ def _ingest_document(db: Session, document_id: uuid.UUID) -> None:
         target_tokens=settings.chunk_target_tokens,
         min_tokens=settings.chunk_min_tokens,
         overlap_tokens=settings.chunk_overlap_tokens,
+        # 幻灯片一页就是一个知识点，按标题切块，不让两页拼进同一块。
+        heading_split_tokens=0 if document.format in _SLIDE_FORMATS else None,
+        # 片段脱离原文还要能自证归属：文档名进检索面包屑。
+        document_title=document.filename,
     )
     if not chunks:
         raise ParseError("未生成有效文本片段")
