@@ -7,10 +7,12 @@ import {
   testProvider,
 } from "../api/settings";
 import type { ModelProviderSettings } from "../api/types";
+import { AppearanceSettings } from "../components/AppearanceSettings";
 import { ModelRoles } from "../components/ModelRoles";
 import { ProviderEditor } from "../components/ProviderEditor";
 import { SavedConfigList } from "../components/SavedConfigList";
 import { NOTICE_AUTO_CLOSE_MS } from "../lib/notice";
+import { useAppPreferences } from "../lib/preferences";
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<ModelProviderSettings | null>(null);
@@ -105,38 +107,24 @@ export function SettingsPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="mx-auto max-w-5xl animate-pulse py-10 text-sm text-ink-mute">
-        正在读取模型配置…
-      </div>
-    );
-  }
-
-  if (!settings) {
-    return (
-      <p
-        role="alert"
-        className="mx-auto max-w-5xl rounded-xl border border-vermilion/20 bg-vermilion-wash px-4 py-3 text-sm leading-relaxed text-vermilion"
-      >
-        {error ?? "模型配置读取失败，请刷新重试"}
-      </p>
-    );
-  }
+  // 外观是纯前端偏好，不依赖后端配置：即使模型配置读取失败也照常显示。
+  const preferences = useAppPreferences();
 
   return (
     <div className="mx-auto max-w-5xl animate-rise">
-      <div className="surface bg-gradient-to-br from-white to-accent-wash/50 p-6 sm:p-8">
+      <div className="surface bg-gradient-to-br from-paper-card to-accent-wash/50 p-6 sm:p-8">
         <p className="text-sm font-semibold text-accent">系统配置</p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight text-ink sm:text-4xl">
-          模型服务
+          设置
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-ink-soft">
-          管理检索和回答模型。配置保存后，可分别测试连接并选择当前使用的模型。
+          调整界面外观，并管理检索和回答模型。外观改动即时生效并保存在本机。
         </p>
       </div>
 
-      {(error || notice) && (
+      <AppearanceSettings preferences={preferences} />
+
+      {settings && (error || notice) ? (
         // 页面较长，测试结果吸附在顶部，避免用户滚到下方操作后还要往上翻。
         // main 是滚动容器且已在移动端 header 下方，所以不需要额外让出 header 高度。
         <div className="sticky top-2 z-20 mt-4">
@@ -158,26 +146,44 @@ export function SettingsPage() {
             />
           </div>
         </div>
+      ) : null}
+
+      {loading ? (
+        <p className="mt-8 animate-pulse text-sm text-ink-mute">正在读取模型配置…</p>
+      ) : !settings ? (
+        <p
+          role="alert"
+          className="mt-8 rounded-xl border border-vermilion/20 bg-vermilion-wash px-4 py-3 text-sm leading-relaxed text-vermilion"
+        >
+          {error ?? "模型配置读取失败，请刷新重试"}
+        </p>
+      ) : (
+        <>
+          <div className="mt-8 flex items-baseline justify-between gap-3 border-b border-ink-line pb-2">
+            <h2 className="text-lg font-semibold text-ink">模型服务</h2>
+            <span className="text-sm text-ink-mute">检索与回答分别取用</span>
+          </div>
+
+          <ModelRoles
+            settings={settings}
+            busy={busy}
+            onRoleChange={(role, configId) => void handleRoleChange(role, configId)}
+          />
+
+          <ProviderEditor settings={settings} onChanged={setSettings} />
+
+          <SavedConfigList
+            settings={settings}
+            testingId={testingId}
+            onTest={(id) => void handleTest(id)}
+            onDelete={(id, label) => void handleDelete(id, label)}
+          />
+
+          <p className="mt-6 rounded-xl bg-paper-card px-4 py-3 text-xs leading-relaxed text-ink-mute">
+            资料入库时片段会发送给所选检索服务；提问时问题与检索片段会发送给所选回答服务。
+          </p>
+        </>
       )}
-
-      <ModelRoles
-        settings={settings}
-        busy={busy}
-        onRoleChange={(role, configId) => void handleRoleChange(role, configId)}
-      />
-
-      <ProviderEditor settings={settings} onChanged={setSettings} />
-
-      <SavedConfigList
-        settings={settings}
-        testingId={testingId}
-        onTest={(id) => void handleTest(id)}
-        onDelete={(id, label) => void handleDelete(id, label)}
-      />
-
-      <p className="mt-6 rounded-xl bg-white px-4 py-3 text-xs leading-relaxed text-ink-mute">
-        资料入库时片段会发送给所选检索服务；提问时问题与检索片段会发送给所选回答服务。
-      </p>
     </div>
   );
 }

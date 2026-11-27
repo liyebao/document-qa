@@ -9,7 +9,7 @@ interface Props {
 type Mode = "text" | "url";
 
 const inputClass =
-  "w-full rounded-lg border border-ink-line bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/10";
+  "w-full rounded-lg border border-ink-line bg-paper-card px-3 py-2.5 text-sm text-ink outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/10";
 
 export function SourceImport({ busy, onCreateText, onImportUrl }: Props) {
   const [mode, setMode] = useState<Mode | null>(null);
@@ -98,14 +98,14 @@ export function SourceImport({ busy, onCreateText, onImportUrl }: Props) {
             <button
               type="submit"
               disabled={busy}
-              className="btn-accent min-h-11 shrink-0 px-3 text-[11px]"
+              className="btn-accent min-h-11 shrink-0 px-3 text-xs"
             >
               {busy ? "处理中…" : mode === "text" ? "文本入库" : "抓取并入库"}
             </button>
             <button
               type="button"
               onClick={() => setMode(null)}
-              className="rounded-lg px-3 py-2 text-xs font-medium text-ink-mute transition hover:bg-white hover:text-ink"
+              className="rounded-lg px-3 py-2 text-xs font-medium text-ink-mute transition hover:bg-paper-card hover:text-ink"
             >
               取消
             </button>

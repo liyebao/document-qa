@@ -1,6 +1,7 @@
 import type { ChangeEvent } from "react";
 import { documentFileUrl } from "../api/documents";
 import type { DocumentItem } from "../api/types";
+import { usePreview } from "../lib/previewContext";
 import { FileStatus } from "./FileStatus";
 import { SourceImport } from "./SourceImport";
 
@@ -8,25 +9,6 @@ import { SourceImport } from "./SourceImport";
 const ACCEPTED_FILE_TYPES =
   ".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.csv,.md,.markdown,.txt,.html,.htm,.epub," +
   ".png,.jpg,.jpeg,.webp,.gif,.tiff,.bmp";
-
-// 浏览器能直接渲染的格式才提供“查看”，其余（Office、EPUB、HTML、TIFF）只能下载。
-// TIFF 主流浏览器不能内联渲染，放进来只会得到一个白屏或下载。
-const PREVIEWABLE_FORMATS = new Set([
-  "pdf",
-  "md",
-  "txt",
-  "csv",
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "gif",
-  "bmp",
-]);
-
-function fileActionLabel(format: string): string {
-  return PREVIEWABLE_FORMATS.has(format) ? "查看" : "下载";
-}
 
 interface Props {
   documents: DocumentItem[];
@@ -53,6 +35,8 @@ export function DocumentSection({
   onRetry,
   onDelete,
 }: Props) {
+  const { openPreview } = usePreview();
+
   return (
     <section className="surface p-5 sm:p-6">
       <div className="flex items-center justify-between gap-3">
@@ -88,7 +72,7 @@ export function DocumentSection({
       {documents.length === 0 ? (
         <div className="mt-5 rounded-xl border border-dashed border-ink-line bg-paper/70 px-5 py-12 text-center">
           <div
-            className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-white text-lg font-bold text-accent shadow-sm"
+            className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-paper-card text-lg font-bold text-accent shadow-sm"
             aria-hidden="true"
           >
             ＋
@@ -132,14 +116,28 @@ export function DocumentSection({
                     重试
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    openPreview({
+                      documentId: document.id,
+                      filename: document.filename,
+                      format: document.format,
+                    })
+                  }
+                  className="row-action"
+                  title="在右侧预览，无需下载"
+                >
+                  查看
+                </button>
                 <a
                   href={documentFileUrl(document.id)}
                   target="_blank"
                   rel="noreferrer"
                   className="row-action"
-                  title={`${fileActionLabel(document.format)}原文件`}
+                  title="下载原文件"
                 >
-                  {fileActionLabel(document.format)}
+                  下载
                 </a>
                 <button
                   type="button"
@@ -148,7 +146,7 @@ export function DocumentSection({
                 >
                   {document.is_enabled ? "停用" : "启用"}
                 </button>
-                <label className="cursor-pointer text-[11px] text-ink-mute transition hover:text-vermilion">
+                <label className="cursor-pointer text-xs text-ink-mute transition hover:text-vermilion">
                   替换
                   <input
                     type="file"

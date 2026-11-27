@@ -1,38 +1,55 @@
-/** @type {import('tailwindcss').Config} */
+/**
+ * 色板全部走 CSS 变量（:root 定义浅色、[data-theme="dark"] 定义深色），
+ * 这样切换主题不需要在每个组件里写 dark: 变体；`rgb(... / <alpha-value>)`
+ * 的写法让 `bg-accent/10` 这类透明度修饰符继续可用。
+ *
+ * @type {import('tailwindcss').Config}
+ */
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
         paper: {
-          DEFAULT: "#FFFFFF",
-          card: "#FFFFFF",
-          deep: "#EEF2F8",
+          DEFAULT: "rgb(var(--paper) / <alpha-value>)",
+          card: "rgb(var(--paper-card) / <alpha-value>)",
+          deep: "rgb(var(--paper-deep) / <alpha-value>)",
+          sunken: "rgb(var(--paper-sunken) / <alpha-value>)",
         },
         ink: {
-          DEFAULT: "#172033",
-          soft: "#4B5870",
-          mute: "#5B6B84",
-          line: "#E1E7F0",
+          DEFAULT: "rgb(var(--ink) / <alpha-value>)",
+          soft: "rgb(var(--ink-soft) / <alpha-value>)",
+          mute: "rgb(var(--ink-mute) / <alpha-value>)",
+          line: "rgb(var(--ink-line) / <alpha-value>)",
         },
         accent: {
-          DEFAULT: "#4F46E5",
-          dark: "#4338CA",
-          wash: "#EEF2FF",
+          DEFAULT: "rgb(var(--accent) / <alpha-value>)",
+          dark: "rgb(var(--accent-dark) / <alpha-value>)",
+          wash: "rgb(var(--accent-wash) / <alpha-value>)",
         },
         vermilion: {
-          DEFAULT: "#AF3B1F",
-          dark: "#8C2C13",
-          wash: "#F2E0D8",
+          DEFAULT: "rgb(var(--vermilion) / <alpha-value>)",
+          dark: "rgb(var(--vermilion-dark) / <alpha-value>)",
+          wash: "rgb(var(--vermilion-wash) / <alpha-value>)",
         },
         jade: {
-          DEFAULT: "#2E5B4C",
-          wash: "#DFE9E3",
+          DEFAULT: "rgb(var(--jade) / <alpha-value>)",
+          wash: "rgb(var(--jade-wash) / <alpha-value>)",
         },
         ochre: {
-          DEFAULT: "#A8761F",
-          wash: "#F3E9D5",
+          DEFAULT: "rgb(var(--ochre) / <alpha-value>)",
+          wash: "rgb(var(--ochre-wash) / <alpha-value>)",
         },
+      },
+      /**
+       * 10 ~ 15px 的少量字号原先写成任意值（text-[11px] 等），固定 px 不跟随
+       * 根字号缩放；换成 rem 令牌后，设置里的「字号」滑杆才能整体生效。
+       */
+      fontSize: {
+        "ui-2xs": "0.625rem",
+        "ui-xs": "0.6875rem",
+        "ui-sm": "0.8125rem",
+        "ui-base": "0.9375rem",
       },
       fontFamily: {
         serif: [

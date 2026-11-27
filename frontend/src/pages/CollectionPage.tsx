@@ -283,7 +283,7 @@ export function CollectionPage() {
         <p className="border-l-2 border-vermilion bg-vermilion-wash px-3 py-2 text-xs text-vermilion">
           {error ?? "资料集不存在"}
         </p>
-        <Link to="/" className="link-quiet text-[13px]">
+        <Link to="/" className="link-quiet text-ui-sm">
           ← 返回资料集列表
         </Link>
       </div>

@@ -1,5 +1,5 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { copyText } from "../lib/clipboard";
+import type { ReactNode } from "react";
+import { useCopyState } from "../lib/clipboard";
 
 /**
  * 代码块卡片：语言标签 + 复制按钮 + 横向滚动。
@@ -16,37 +16,19 @@ export function CodeBlock({
   code: string;
   children: ReactNode;
 }) {
-  const [copyState, setCopyState] = useState<"idle" | "done" | "error">("idle");
-  const timerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current !== null) {
-        window.clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
-
-  const handleCopy = useCallback(async () => {
-    const ok = await copyText(code);
-    setCopyState(ok ? "done" : "error");
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-    }
-    timerRef.current = window.setTimeout(() => setCopyState("idle"), 2000);
-  }, [code]);
+  const { copyState, copy } = useCopyState();
 
   return (
-    <div className="my-4 overflow-hidden rounded-xl border border-ink-line bg-[#FBFCFE]">
+    <div className="my-4 overflow-hidden rounded-xl border border-ink-line bg-paper-sunken">
       <div className="flex items-center justify-between border-b border-ink-line bg-paper-deep/70 px-3 py-1.5">
-        <span className="font-mono text-[11px] tracking-wide text-ink-mute">
+        <span className="font-mono text-xs tracking-wide text-ink-mute">
           {language || "text"}
         </span>
         <button
           type="button"
-          onClick={() => void handleCopy()}
+          onClick={() => void copy(code)}
           aria-live="polite"
-          className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium transition hover:bg-white ${
+          className={`rounded-md px-1.5 py-0.5 text-xs font-medium transition hover:bg-paper-card ${
             copyState === "done"
               ? "text-jade"
               : copyState === "error"

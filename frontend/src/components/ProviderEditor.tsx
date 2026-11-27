@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { errorMessage } from "../api/client";
 import {
+  fetchProviderModels,
   fetchProviderSettings,
   saveProvider,
   testProvider,
@@ -11,6 +12,7 @@ import type {
   ModelProviderSettings,
   ProviderInfo,
 } from "../api/types";
+import { buildModelOptions, countUnlistedModels } from "../lib/modelOptions";
 import { NOTICE_AUTO_CLOSE_MS } from "../lib/notice";
 
 export const CUSTOM_MODEL = "__custom__";
@@ -87,6 +89,9 @@ export function ProviderEditor({ settings, onChanged }: Props) {
   const [testing, setTesting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // null 表示"没有探测结果"（云端服务商，或本地服务连不上）——此时沿用静态推荐清单。
+  const [localModels, setLocalModels] = useState<string[] | null>(null);
+  const [localHint, setLocalHint] = useState("");
 
   // 保存/测试结果自动消失，避免长期占住表单下方。
   useEffect(() => {
@@ -102,6 +107,46 @@ export function ProviderEditor({ settings, onChanged }: Props) {
 
   const provider = settings.providers.find((item) => item.key === providerKey);
   const existing = settings.configs.find((item) => item.provider_key === providerKey);
+  // 只有本地服务商（不需要 Key）才有"已下载模型"的概念。
+  const needsLocalProbe = Boolean(provider && !provider.requires_api_key);
+
+  useEffect(() => {
+    if (!needsLocalProbe) {
+      setLocalModels(null);
+      setLocalHint("");
+      return;
+    }
+    let cancelled = false;
+    fetchProviderModels(providerKey)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        // 连不上本地服务时保持 null，不要显示成"一个模型都没有"。
+        setLocalModels(result.reachable ? result.installed : null);
+        setLocalHint(result.reachable ? "" : result.message);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setLocalModels(null);
+        setLocalHint("无法读取本地模型列表，已回退到推荐清单");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [providerKey, needsLocalProbe]);
+
+  const embeddingOptions = buildModelOptions(
+    provider?.embedding_models ?? [],
+    localModels,
+  );
+  const chatOptions = buildModelOptions(provider?.chat_models ?? [], localModels);
+  const unlisted = countUnlistedModels(localModels, [
+    provider?.embedding_models ?? [],
+    provider?.chat_models ?? [],
+  ]);
 
   function loadProvider(key: string) {
     const form = buildForm(settings, key);
@@ -227,7 +272,7 @@ export function ProviderEditor({ settings, onChanged }: Props) {
 
   return (
     <section className="surface mt-6 overflow-hidden">
-      <div className="flex items-center justify-between border-b border-ink-line bg-white px-5 py-4">
+      <div className="flex items-center justify-between border-b border-ink-line bg-paper-card px-5 py-4">
         <div>
           <h2 className="text-base font-semibold text-ink">连接配置</h2>
           <p className="mt-1 text-xs text-ink-mute">选择服务商并验证模型是否可用</p>
@@ -316,10 +361,16 @@ export function ProviderEditor({ settings, onChanged }: Props) {
                     onChange={(event) => setEmbeddingChoice(event.target.value)}
                     className="field-select mt-2"
                   >
-                    {provider.embedding_models.map((model) => (
-                      <option key={model} value={model}>
-                        {model}
-                        {model === provider.embedding_models[0] ? "（推荐）" : ""}
+                    {embeddingOptions.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.value}
+                        {item.installed
+                          ? " · 本地已安装"
+                          : localModels
+                            ? " · 未下载"
+                            : item.recommended
+                              ? "（推荐）"
+                              : ""}
                       </option>
                     ))}
                     <option value={CUSTOM_MODEL}>自定义模型…</option>
@@ -334,7 +385,7 @@ export function ProviderEditor({ settings, onChanged }: Props) {
                   )}
                 </div>
               ) : (
-                <p className="text-[11px] leading-relaxed text-ink-mute">
+                <p className="text-xs leading-relaxed text-ink-mute">
                   该服务商不提供检索模型，只能用于回答；检索需要另配一个支持 Embedding
                   的服务商。
                 </p>
@@ -350,10 +401,16 @@ export function ProviderEditor({ settings, onChanged }: Props) {
                   onChange={(event) => setChatChoice(event.target.value)}
                   className="field-select mt-2"
                 >
-                  {provider?.chat_models.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                      {model === provider?.chat_models[0] ? "（推荐）" : ""}
+                  {chatOptions.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.value}
+                      {item.installed
+                        ? " · 本地已安装"
+                        : localModels
+                          ? " · 未下载"
+                          : item.recommended
+                            ? "（推荐）"
+                            : ""}
                     </option>
                   ))}
                   <option value={CUSTOM_MODEL}>自定义模型…</option>
@@ -368,6 +425,20 @@ export function ProviderEditor({ settings, onChanged }: Props) {
                 )}
               </div>
             </div>
+
+            {needsLocalProbe && (
+              <p
+                className={`text-xs leading-relaxed ${
+                  localModels ? "text-ink-mute" : "text-ochre"
+                }`}
+              >
+                {localModels
+                  ? localModels.length > 0
+                    ? `已检测到本地 ${localModels.length} 个模型；标「本地已安装」的可直接使用，「未下载」的需先 ollama pull。${unlisted > 0 ? `另有 ${unlisted} 个不在推荐列表，可手动输入模型名使用。` : ""}`
+                    : "本地 Ollama 还没下载任何模型，请先执行 ollama pull bge-m3"
+                  : localHint || "正在检测本地模型…"}
+              </p>
+            )}
 
             {provider && provider.rerank_models.length > 0 && (
               <div>
@@ -390,7 +461,7 @@ export function ProviderEditor({ settings, onChanged }: Props) {
                     </option>
                   ))}
                 </select>
-                <p className="mt-1 text-[10px] leading-relaxed text-ink-mute">
+                <p className="mt-1 text-ui-2xs leading-relaxed text-ink-mute">
                   启用后对前 15 条候选重新排序；调用失败会自动回退，不影响问答。
                 </p>
               </div>

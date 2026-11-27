@@ -3,13 +3,104 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * 主题变量：浅色是默认形态，深色通过 <html data-theme="dark"> 覆盖同一组变量。
+   * 组件里只写语义色（bg-paper-card / text-ink …），不出现 dark: 变体。
+   */
+  :root {
+    color-scheme: light;
+
+    --paper: 255 255 255;
+    --paper-card: 255 255 255;
+    --paper-deep: 238 242 248;
+    --paper-sunken: 251 252 254;
+
+    --ink: 23 32 51;
+    --ink-soft: 75 88 112;
+    --ink-mute: 91 107 132;
+    --ink-line: 225 231 240;
+
+    --accent: 79 70 229;
+    --accent-dark: 67 56 202;
+    --accent-wash: 238 242 255;
+
+    --vermilion: 175 59 31;
+    --vermilion-dark: 140 44 19;
+    --vermilion-wash: 242 224 216;
+
+    --jade: 46 91 76;
+    --jade-wash: 223 233 227;
+
+    --ochre: 168 118 31;
+    --ochre-wash: 243 233 213;
+
+    /* 代码块语法高亮 */
+    --hl-text: #4b5870;
+    --hl-comment: #8a97ab;
+    --hl-keyword: #4f46e5;
+    --hl-string: #2e5b4c;
+    --hl-number: #a8761f;
+    --hl-title: #1d4ed8;
+    --hl-builtin: #7c3aed;
+    --hl-meta: #5b6b84;
+    --hl-deletion: #af3b1f;
+
+    --scrollbar-thumb: #cbd5e1;
+  }
+
+  html[data-theme="dark"] {
+    color-scheme: dark;
+
+    --paper: 15 18 24;
+    --paper-card: 22 27 35;
+    --paper-deep: 32 38 48;
+    --paper-sunken: 18 22 29;
+
+    --ink: 231 235 243;
+    --ink-soft: 176 185 199;
+    --ink-mute: 141 151 166;
+    --ink-line: 44 51 64;
+
+    --accent: 108 111 245;
+    --accent-dark: 139 143 248;
+    --accent-wash: 37 39 72;
+
+    --vermilion: 240 138 110;
+    --vermilion-dark: 250 165 140;
+    --vermilion-wash: 58 32 26;
+
+    --jade: 110 200 168;
+    --jade-wash: 26 51 43;
+
+    --ochre: 226 178 92;
+    --ochre-wash: 55 44 22;
+
+    --hl-text: #c3cbdc;
+    --hl-comment: #7b8798;
+    --hl-keyword: #a5b4fc;
+    --hl-string: #86d0b0;
+    --hl-number: #e3b872;
+    --hl-title: #93b4ff;
+    --hl-builtin: #c4b5fd;
+    --hl-meta: #93a1b5;
+    --hl-deletion: #f08a6e;
+
+    --scrollbar-thumb: #3b4453;
+  }
+
+  /*
+   * 设置里的「字号」写的是 --ui-font-scale（0.85 ~ 1.4），
+   * 这里把它折成根字号，rem 单位的文字与间距会一起等比缩放。
+   */
   html {
     -webkit-text-size-adjust: 100%;
+    font-size: calc(100% * var(--ui-font-scale, 1));
   }
 
   body {
     @apply bg-paper font-sans text-ink antialiased;
     background-image: none;
+    transition: background-color 200ms ease-out;
   }
 
   p {
@@ -28,7 +119,7 @@
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   *::-webkit-scrollbar {
@@ -37,7 +128,7 @@
   }
 
   *::-webkit-scrollbar-thumb {
-    background-color: #cbd5e1;
+    background-color: var(--scrollbar-thumb);
     border-radius: 999px;
   }
 
@@ -48,7 +139,7 @@
 
 @layer components {
   .field {
-    @apply w-full rounded-lg border border-ink-line bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition duration-200 ease-out placeholder:text-ink-mute focus:border-accent focus:ring-4 focus:ring-accent/10;
+    @apply w-full rounded-lg border border-ink-line bg-paper-card px-3.5 py-2.5 text-sm text-ink outline-none transition duration-200 ease-out placeholder:text-ink-mute focus:border-accent focus:ring-4 focus:ring-accent/10;
   }
 
   .field-select {
@@ -70,11 +161,11 @@
   }
 
   .btn-ghost {
-    @apply btn border border-ink-line bg-white text-ink-soft hover:border-accent/40 hover:bg-accent-wash hover:text-accent;
+    @apply btn border border-ink-line bg-paper-card text-ink-soft hover:border-accent/40 hover:bg-accent-wash hover:text-accent;
   }
 
   .surface {
-    @apply rounded-2xl border border-ink-line bg-white shadow-card;
+    @apply rounded-2xl border border-ink-line bg-paper-card shadow-card;
   }
 
   .eyebrow {
@@ -94,6 +185,54 @@
   }
 
   /*
+   * 设置页的字号滑杆：外观与项目一致（细轨道 + 圆形滑块），
+   * 轨道已填充部分由组件的 inline background-image 控制。
+   */
+  .range-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background-color: rgb(var(--paper-deep));
+    cursor: pointer;
+  }
+
+  .range-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 2px solid rgb(var(--paper-card));
+    background-color: rgb(var(--accent));
+    box-shadow: 0 1px 3px rgb(15 18 24 / 0.35);
+    transition: transform 150ms ease-out;
+  }
+
+  .range-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 2px solid rgb(var(--paper-card));
+    background-color: rgb(var(--accent));
+    box-shadow: 0 1px 3px rgb(15 18 24 / 0.35);
+  }
+
+  .range-slider:active::-webkit-slider-thumb {
+    transform: scale(1.08);
+  }
+
+  /*
+   * 多选列表的原生勾选框：只把颜色接到主题色，键盘操作与读屏语义保持原生。
+   */
+  .checkbox {
+    @apply h-4 w-4 shrink-0 cursor-pointer;
+    accent-color: rgb(var(--accent));
+  }
+
+  /*
    * 跳过导航：平时视觉隐藏（不能 display:none，否则不可聚焦），
    * 拿到焦点后浮到左上角，避免被侧边栏遮住。
    */
@@ -110,9 +249,10 @@
     position: relative;
   }
 
+  /* 文字色用 paper：深色主题下 ink 变浅、paper 变深，提示条自动反转。 */
   .rail-tip::after {
     content: attr(data-tip);
-    @apply pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-30 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-card transition-opacity duration-150;
+    @apply pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-30 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-ui-xs font-medium text-paper opacity-0 shadow-card transition-opacity duration-150;
   }
 
   .rail-tip:hover::after,
@@ -131,15 +271,15 @@
   }
 }
 
-/* 代码块语法高亮：与项目色板对齐的浅色主题，由 rehype-highlight 输出的 hljs-* 类驱动。 */
+/* 代码块语法高亮：由 rehype-highlight 输出的 hljs-* 类驱动，配色跟随主题变量。 */
 .hljs {
-  color: #4b5870;
+  color: var(--hl-text);
   background: transparent;
 }
 
 .hljs-comment,
 .hljs-quote {
-  color: #8a97ab;
+  color: var(--hl-comment);
   font-style: italic;
 }
 
@@ -151,7 +291,7 @@
 .hljs-type,
 .hljs-name,
 .hljs-strong {
-  color: #4f46e5;
+  color: var(--hl-keyword);
   font-weight: 600;
 }
 
@@ -160,7 +300,7 @@
 .hljs-addition,
 .hljs-attribute,
 .hljs-meta .hljs-string {
-  color: #2e5b4c;
+  color: var(--hl-string);
 }
 
 .hljs-number,
@@ -171,29 +311,29 @@
 .hljs-link,
 .hljs-selector-attr,
 .hljs-selector-pseudo {
-  color: #a8761f;
+  color: var(--hl-number);
 }
 
 .hljs-title,
 .hljs-title.function_,
 .hljs-title.class_,
 .hljs-function .hljs-title {
-  color: #1d4ed8;
+  color: var(--hl-title);
 }
 
 .hljs-built_in,
 .hljs-attr,
 .hljs-property {
-  color: #7c3aed;
+  color: var(--hl-builtin);
 }
 
 .hljs-meta,
 .hljs-tag {
-  color: #5b6b84;
+  color: var(--hl-meta);
 }
 
 .hljs-deletion {
-  color: #af3b1f;
+  color: var(--hl-deletion);
 }
 
 .hljs-emphasis {

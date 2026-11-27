@@ -114,7 +114,7 @@ export function SavedConfigList({ settings, testingId, onTest, onDelete }: Props
           })}
         </ul>
       ) : (
-        <p className="py-8 text-[13px] text-ink-soft">
+        <p className="py-8 text-ui-sm text-ink-soft">
           还没有保存的模型服务，先在上方选择一个服务商并填入 API Key。
         </p>
       )}

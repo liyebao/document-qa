@@ -90,7 +90,7 @@ export function ConversationRowMenu({
         ref={firstItemRef}
         type="button"
         role="menuitem"
-        className="flex w-full items-center px-3 py-1.5 text-left text-[13px] text-ink transition hover:bg-paper-deep"
+        className="flex w-full items-center px-3 py-1.5 text-left text-ui-sm text-ink transition hover:bg-paper-deep"
         onClick={onRename}
       >
         重命名
@@ -98,7 +98,7 @@ export function ConversationRowMenu({
       <button
         type="button"
         role="menuitem"
-        className="flex w-full items-center px-3 py-1.5 text-left text-[13px] text-vermilion transition hover:bg-vermilion-wash"
+        className="flex w-full items-center px-3 py-1.5 text-left text-ui-sm text-vermilion transition hover:bg-vermilion-wash"
         onClick={onDelete}
       >
         删除

@@ -7,6 +7,30 @@ export interface ProviderInfo {
   requires_api_key: boolean;
 }
 
+/** 本地服务商（Ollama）实际已下载的模型；reachable=false 表示连不上本地服务。 */
+export interface ProviderModels {
+  provider_key: string;
+  reachable: boolean;
+  installed: string[];
+  message: string;
+}
+
+/** 预览用的单个片段：chunk_id 用于把引用精确定位到某一块。 */
+export interface DocumentPreviewBlock {
+  chunk_id: string;
+  ordinal: number;
+  source_location: string;
+  text: string;
+}
+
+export interface DocumentPreview {
+  document_id: string;
+  document_name: string;
+  format: string;
+  truncated: boolean;
+  blocks: DocumentPreviewBlock[];
+}
+
 export interface ModelProviderConfig {
   id: string;
   provider_key: string;
@@ -76,22 +100,6 @@ export interface DocumentItem {
   created_at: string;
 }
 
-export interface ChunkSnippet {
-  chunk_id: string;
-  ordinal: number;
-  source_location: string;
-  text: string;
-}
-
-export interface ChunkContext {
-  document_id: string;
-  document_name: string;
-  format: string;
-  chunk: ChunkSnippet;
-  previous: ChunkSnippet | null;
-  next: ChunkSnippet | null;
-}
-
 export interface Citation {
   id: string;
   chunk_id: string | null;
@@ -102,6 +110,24 @@ export interface Citation {
   quote_snapshot: string;
 }
 
+export interface RetrievalTraceDocument {
+  name: string;
+  location: string;
+  marker: number;
+}
+
+export interface RetrievalTraceData {
+  queries: string[];
+  documents: RetrievalTraceDocument[];
+  searches: number;
+  expanded: number;
+  full_scan_chunks?: number;
+  /** 按编号补全的原文条数（问题点名条/章/节时补进来的部分）。 */
+  reference_chunks?: number;
+  /** @deprecated 旧消息只有这个字段；新消息写 reference_chunks。 */
+  cross_doc_chunks?: number;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -109,6 +135,7 @@ export interface Message {
   status: string;
   created_at: string;
   citations: Citation[];
+  retrieval_trace?: RetrievalTraceData;
 }
 
 export interface CollectionReindexResult extends CollectionOut {

@@ -30,9 +30,27 @@ describe("ChatMessage", () => {
     expect(html).toContain("项目存在进度风险");
     expect(html).toContain("项目风险报告.pdf");
     expect(html).toContain("第 3 页");
-    expect(html).toContain("打开原文");
-    expect(html).toContain("/api/documents/document-1/file#page=3");
     expect(html).toContain("项目存在进度风险，需要提前准备资源。");
+  });
+
+  it("groups citations from the same document and starts collapsed", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessage
+        message={{
+          ...ASSISTANT_MESSAGE,
+          citations: [
+            ASSISTANT_MESSAGE.citations[0],
+            { ...ASSISTANT_MESSAGE.citations[0], id: "citation-2", marker_index: 2 },
+          ],
+        }}
+      />,
+    );
+
+    // 同一份文件只渲染一个卡片（每条引用一个 li），条目数体现在摘要里。
+    expect(html).toContain("1 个文件 · 2 条引用");
+    expect(html.match(/<ul class="mt-1\.5 space-y-1">/g)).toHaveLength(1);
+    expect(html.match(/<li>/g)).toHaveLength(2);
+    expect(html).not.toContain("<details open");
   });
 
   it("shows an evidence warning for insufficient answers", () => {
@@ -98,12 +116,13 @@ describe("ChatMessage", () => {
     expect(html).not.toContain("## 结论");
   });
 
-  it("turns citation markers into source badges", () => {
+  it("turns citation markers into clickable badges", () => {
     const html = renderToStaticMarkup(<ChatMessage message={ASSISTANT_MESSAGE} />);
 
-    expect(html).toContain("/api/documents/document-1/file#page=3");
     expect(html).toContain('aria-label="引用 1：项目风险报告.pdf 第 3 页"');
-    expect(html).toContain(">1</a>");
+    // 点编号走右侧抽屉预览，不再直接链到原文件（Office 文件那样会变成下载）。
+    expect(html).toContain(">1</button>");
+    expect(html).not.toContain("/api/documents/document-1/file");
   });
 
   it("renders fenced code as a card with language label and copy", () => {

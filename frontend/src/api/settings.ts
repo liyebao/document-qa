@@ -3,10 +3,16 @@ import type {
   ConnectionTestResult,
   ModelProviderConfig,
   ModelProviderSettings,
+  ProviderModels,
 } from "./types";
 
 export function fetchProviderSettings(): Promise<ModelProviderSettings> {
   return request<ModelProviderSettings>("/settings/model-providers");
+}
+
+/** 查询本地服务商实际已下载的模型；云端服务商会返回 reachable=false。 */
+export function fetchProviderModels(providerKey: string): Promise<ProviderModels> {
+  return request<ProviderModels>(`/settings/model-providers/${providerKey}/models`);
 }
 
 export interface SaveProviderPayload {

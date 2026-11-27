@@ -4,6 +4,7 @@ import type {
   ConversationListItem,
   ConversationSummary,
   MessageExchange,
+  RetrievalTraceData,
 } from "./types";
 
 /** 跨资料集的最近会话（侧边栏），一次请求取完，按最近活动时间倒序。 */
@@ -32,6 +33,7 @@ export function deleteConversation(id: string): Promise<void> {
 
 export interface StreamHandlers {
   onDelta: (text: string) => void;
+  onRetrieval: (trace: RetrievalTraceData) => void;
   onDone: (payload: MessageExchange) => void;
   onError: (message: string) => void;
 }
@@ -103,6 +105,8 @@ export async function sendMessageStream(
         if (data.text) {
           handlers.onDelta(data.text);
         }
+      } else if (parsed.event === "retrieval") {
+        handlers.onRetrieval(JSON.parse(parsed.data) as RetrievalTraceData);
       } else if (parsed.event === "done") {
         finished = true;
         handlers.onDone(JSON.parse(parsed.data) as MessageExchange);

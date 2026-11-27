@@ -20,7 +20,7 @@ export function FileStatus({
   return (
     <span
       title={failureReason ?? undefined}
-      className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${meta.text}`}
+      className={`inline-flex items-center gap-1.5 text-xs font-medium ${meta.text}`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} aria-hidden="true" />
       {meta.label}

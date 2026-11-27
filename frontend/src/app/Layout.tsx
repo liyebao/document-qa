@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
+import { PreviewProvider } from "../components/PreviewProvider";
 import { NewConversationDialog } from "./NewConversationDialog";
 import { useRecentConversations } from "./recent";
 import { BrandMark, Sidebar } from "./Sidebar";
@@ -36,6 +37,10 @@ export function AppLayout() {
   const sidebarWidth = sidebarCollapsed
     ? SIDEBAR_WIDTH_COLLAPSED
     : SIDEBAR_WIDTH_EXPANDED;
+  // 侧边栏宽度跟着「设置 - 字号」一起缩放，字号调大后标题不会被过度截断。
+  const sidebarStyle = {
+    width: `calc(${sidebarWidth}px * var(--ui-font-scale, 1))`,
+  };
 
   useFocusTrap(drawerPanelRef, drawerOpen, hamburgerRef);
 
@@ -98,7 +103,7 @@ export function AppLayout() {
 
       <div
         className="hidden shrink-0 transition-[width] duration-200 ease-out md:block"
-        style={{ width: sidebarWidth }}
+        style={sidebarStyle}
       >
         <Sidebar
           pathname={pathname}
@@ -115,7 +120,7 @@ export function AppLayout() {
             type="button"
             aria-label="关闭导航"
             onClick={closeDrawer}
-            className="absolute inset-0 animate-fade cursor-default bg-ink/40 backdrop-blur-sm"
+            className="absolute inset-0 animate-fade cursor-default bg-black/40 backdrop-blur-sm"
           />
           <div
             id="app-sidebar"
@@ -123,7 +128,7 @@ export function AppLayout() {
             role="dialog"
             aria-modal="true"
             aria-label="侧边导航"
-            className="relative flex h-full w-[86%] max-w-[320px] animate-slide-in flex-col bg-white shadow-lift"
+            className="relative flex h-full w-[86%] max-w-[320px] animate-slide-in flex-col bg-paper-card shadow-lift"
           >
             <Sidebar
               pathname={pathname}
@@ -144,7 +149,7 @@ export function AppLayout() {
         className="flex min-h-0 min-w-0 flex-1 flex-col"
         aria-hidden={drawerOpen ? true : undefined}
       >
-        <header className="flex shrink-0 items-center gap-2 border-b border-ink-line bg-white/95 px-3 py-2.5 backdrop-blur md:hidden">
+        <header className="flex shrink-0 items-center gap-2 border-b border-ink-line bg-paper-card/95 px-3 py-2.5 backdrop-blur md:hidden">
           <button
             type="button"
             ref={hamburgerRef}
@@ -197,17 +202,20 @@ export function AppLayout() {
           tabIndex={-1}
           className="flex min-h-0 flex-1 flex-col overflow-hidden focus:outline-none"
         >
-          {isConversation ? (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <Outlet />
-            </div>
-          ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6 md:px-8 md:py-8">
+          {/* 预览抽屉挂在页面内容外层：引用卡片与文件列表共用同一块右侧面板。 */}
+          <PreviewProvider>
+            {isConversation ? (
+              <div className="flex min-h-0 flex-1 flex-col">
                 <Outlet />
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6 md:px-8 md:py-8">
+                  <Outlet />
+                </div>
+              </div>
+            )}
+          </PreviewProvider>
         </main>
       </div>
 

@@ -1,9 +1,14 @@
 import { API_BASE, request } from "./client";
-import type { ChunkContext, DocumentItem } from "./types";
+import type { DocumentItem, DocumentPreview } from "./types";
 
 export function documentFileUrl(documentId: string, page?: number | null): string {
   const url = `${API_BASE}/documents/${documentId}/file`;
   return page ? `${url}#page=${page}` : url;
+}
+
+/** 按原文件重新排版成的 HTML，供 Office 等浏览器不能直接渲染的格式预览。 */
+export function documentRenderUrl(documentId: string): string {
+  return `${API_BASE}/documents/${documentId}/render`;
 }
 
 export function listDocuments(collectionId: string): Promise<DocumentItem[]> {
@@ -19,11 +24,9 @@ export function uploadDocument(collectionId: string, file: File): Promise<Docume
   });
 }
 
-export function getChunkContext(
-  documentId: string,
-  chunkId: string,
-): Promise<ChunkContext> {
-  return request<ChunkContext>(`/documents/${documentId}/chunks/${chunkId}/context`);
+/** 解析后的片段序列，用于抽屉内预览非 PDF 文件并定位引用。 */
+export function getDocumentPreview(documentId: string): Promise<DocumentPreview> {
+  return request<DocumentPreview>(`/documents/${documentId}/preview`);
 }
 
 export function createTextDocument(

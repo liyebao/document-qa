@@ -10,8 +10,14 @@ import { Link, useParams } from "react-router-dom";
 import { errorMessage } from "../api/client";
 import { getConversation, sendMessageStream } from "../api/conversations";
 import { listDocuments } from "../api/documents";
-import type { ConversationDetail, DocumentItem, Message } from "../api/types";
+import type {
+  ConversationDetail,
+  DocumentItem,
+  Message,
+  RetrievalTraceData,
+} from "../api/types";
 import { ChatMessage } from "../components/ChatMessage";
+import { RetrievalTrace } from "../components/RetrievalTrace";
 import { notifyConversationsChanged } from "../app/recent";
 
 export function ConversationPage() {
@@ -26,11 +32,17 @@ export function ConversationPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [streamText, setStreamText] = useState("");
+  const [streamTrace, setStreamTrace] = useState<RetrievalTraceData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   // 只有用户停留在底部时才自动跟随；上翻查看历史时不抢滚动位置。
   const stickToBottom = useRef(true);
+  // 上一次由代码设置的滚动位置，用来把"自动贴底"与"用户上翻"区分开。
+  const lastProgrammatic = useRef(-1);
+  // 当前是否有真实的用户操作（滚轮、拖动、按键），避免程序滚动污染跟随状态。
+  const userInteracting = useRef(false);
+  const interactionTimer = useRef<number | null>(null);
   // 流式增量先攒在 ref 里，按帧合并成一次 state 更新，避免每个 token 都全量重渲染。
   const streamBuffer = useRef("");
   const streamFrame = useRef<number | null>(null);
@@ -85,6 +97,7 @@ export function ConversationPage() {
     }
     streamBuffer.current = "";
     setStreamText("");
+    setStreamTrace(null);
   }, []);
 
   useEffect(() => {
@@ -96,18 +109,63 @@ export function ConversationPage() {
     };
   }, []);
 
+  // 切换到另一个会话时重新跟随底部：进入时应看到最新一条消息，而不是历史开头。
   useEffect(() => {
+    stickToBottom.current = true;
+  }, [conversationId]);
+
+  const scrollToBottom = useCallback(() => {
     const container = scrollRef.current;
-    if (!container || !stickToBottom.current) {
+    if (!container) {
       return;
     }
-    // 直接赋值而不是 smooth：平滑滚动会和渲染抢主线程，长回答时明显卡顿。
     container.scrollTop = container.scrollHeight;
-  }, [conversation?.messages.length, sending, streamText]);
+    // 记下程序设定的位置，供 handleScroll 区分"自动贴底"和"用户上翻"。
+    lastProgrammatic.current = container.scrollTop;
+  }, []);
+
+  useEffect(() => {
+    if (!stickToBottom.current) {
+      return;
+    }
+    // 消息刚渲染的那一帧 scrollHeight 还没算准（字体、引用卡片都有影响），
+    // 等下一帧再贴底，避免停在中间。直接赋值而不是 smooth：平滑滚动会和渲染抢主线程。
+    const frame = window.requestAnimationFrame(scrollToBottom);
+    return () => window.cancelAnimationFrame(frame);
+  }, [conversation?.messages.length, sending, streamText, scrollToBottom]);
+
+  // 字体、图片、引用卡片展开都会继续改变内容高度，只在仍跟随底部时补一次贴底。
+  useEffect(() => {
+    const container = scrollRef.current;
+    const inner = container?.firstElementChild;
+    if (!container || !(inner instanceof HTMLElement)) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      if (!stickToBottom.current) {
+        return;
+      }
+      container.scrollTop = container.scrollHeight;
+      lastProgrammatic.current = container.scrollTop;
+    });
+    observer.observe(inner);
+    return () => observer.disconnect();
+  }, [conversationId, loading]);
+
+  /** 只有真正的用户操作才改变"是否跟随底部"，程序滚动与内容重排不算。 */
+  function markInteraction() {
+    userInteracting.current = true;
+    if (interactionTimer.current !== null) {
+      window.clearTimeout(interactionTimer.current);
+    }
+    interactionTimer.current = window.setTimeout(() => {
+      userInteracting.current = false;
+    }, 600);
+  }
 
   function handleScroll() {
     const container = scrollRef.current;
-    if (!container) {
+    if (!container || !userInteracting.current) {
       return;
     }
     stickToBottom.current =
@@ -149,6 +207,7 @@ export function ConversationPage() {
         scopeIds,
         {
           onDelta: appendDelta,
+          onRetrieval: setStreamTrace,
           onDone: ({ user_message, assistant_message }) => {
             setConversation((current) =>
               current
@@ -229,7 +288,7 @@ export function ConversationPage() {
         <p className="border-l-2 border-vermilion bg-vermilion-wash px-3 py-2 text-xs text-vermilion">
           {error ?? "会话不存在"}
         </p>
-        <Link to="/" className="link-quiet text-[13px]">
+        <Link to="/" className="link-quiet text-ui-sm">
           ← 返回资料集列表
         </Link>
       </div>
@@ -257,14 +316,14 @@ export function ConversationPage() {
             type="button"
             onClick={() => setScopeOpen((open) => !open)}
             aria-expanded={scopeOpen}
-            className="rounded-full border border-ink-line bg-white px-3 py-1.5 text-xs font-medium text-ink-soft transition hover:border-accent/40 hover:text-accent"
+            className="rounded-full border border-ink-line bg-paper-card px-3 py-1.5 text-xs font-medium text-ink-soft transition hover:border-accent/40 hover:text-accent"
           >
             {scopeIds.length === 0 ? "整个资料集" : `已选 ${scopeIds.length} 份`}
             <span className="ml-1">{scopeOpen ? "▴" : "▾"}</span>
           </button>
 
           {scopeOpen && (
-            <div className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-ink-line bg-white p-2 shadow-lift">
+            <div className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-ink-line bg-paper-card p-2 shadow-lift">
               <div className="flex items-center justify-between px-2 py-1">
                 <span className="text-xs font-semibold text-ink-soft">检索范围</span>
                 {scopeIds.length > 0 && (
@@ -315,6 +374,9 @@ export function ConversationPage() {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        onWheel={markInteraction}
+        onTouchMove={markInteraction}
+        onPointerDown={markInteraction}
         className="mx-auto min-h-0 w-full max-w-3xl flex-1 space-y-8 overflow-y-auto py-6 pr-1"
       >
         {error && (
@@ -355,12 +417,18 @@ export function ConversationPage() {
               status: "completed",
               created_at: new Date().toISOString(),
               citations: [],
+              retrieval_trace: streamTrace ?? undefined,
             }}
           />
         )}
 
         {sending && !streamText && (
           <div className="flex items-center gap-3 text-sm text-ink-mute">
+            {streamTrace ? (
+              <div className="min-w-0 flex-1">
+                <RetrievalTrace trace={streamTrace} />
+              </div>
+            ) : null}
             <span className="flex gap-1" aria-hidden="true">
               {[0, 1, 2].map((index) => (
                 <span
@@ -382,7 +450,7 @@ export function ConversationPage() {
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <form onSubmit={handleSubmit} className="mx-auto w-full max-w-3xl pb-3 pt-3">
-          <div className="flex items-end gap-2 rounded-2xl border border-ink-line bg-white p-2 shadow-lift transition focus-within:border-accent/40">
+          <div className="flex items-end gap-2 rounded-2xl border border-ink-line bg-paper-card p-2 shadow-lift transition focus-within:border-accent/40">
             <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
@@ -414,7 +482,7 @@ export function ConversationPage() {
           <p className="mt-2 flex items-center justify-between gap-3 px-1 text-xs text-ink-mute">
             <span className="truncate">Enter 发送 · Shift + Enter 换行</span>
             <span className="hidden shrink-0 sm:inline">
-              回答仅依据本资料集的检索片段
+              回答仅依据本资料集
             </span>
             <span className="shrink-0 font-mono">{question.length} / 4000</span>
           </p>

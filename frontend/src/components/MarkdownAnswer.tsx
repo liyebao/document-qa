@@ -4,12 +4,14 @@ import ReactMarkdown, { type Components, defaultUrlTransform } from "react-markd
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { Citation } from "../api/types";
-import { citationFileUrl } from "../lib/citationLink";
+import { citationPage } from "../lib/citationLink";
 import {
   CITATION_SCHEME,
   citationMarkerFromHref,
   toCitationLinks,
 } from "../lib/citationMarkdown";
+import { tidyMarkdown } from "../lib/markdownTidy";
+import { formatFromFilename, usePreview } from "../lib/previewContext";
 import { CodeBlock } from "./CodeBlock";
 
 /**
@@ -68,7 +70,9 @@ export function MarkdownAnswer({
   content: string;
   citations: Citation[];
 }) {
-  const source = useMemo(() => toCitationLinks(content), [content]);
+  const { openPreview } = usePreview();
+  // 先修中文写法里不成立的标记，再把 [1] 改写成引用链接，避免互相干扰。
+  const source = useMemo(() => toCitationLinks(tidyMarkdown(content)), [content]);
 
   const components = useMemo<Components>(() => {
     const byMarker = new Map(
@@ -165,28 +169,38 @@ export function MarkdownAnswer({
         const marker = typeof href === "string" ? citationMarkerFromHref(href) : null;
         if (marker !== null) {
           const citation = byMarker.get(marker);
-          const fileUrl = citation ? citationFileUrl(citation) : null;
+          const documentId = citation?.document_id;
           const label = citation
             ? `引用 ${marker}：${citation.document_name} ${citation.source_location}`
             : `引用 ${marker}`;
-          if (!fileUrl || !citation) {
+          if (!citation || !documentId) {
             return (
               <span className={CITATION_BADGE} title={label}>
                 {children}
               </span>
             );
           }
+          // 点编号直接在右侧打开原文：Office 文件用原文件链接只会触发下载。
           return (
-            <a
-              href={fileUrl}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={() =>
+                openPreview({
+                  documentId,
+                  filename: citation.document_name,
+                  format: formatFromFilename(citation.document_name),
+                  page: citationPage(citation.source_location),
+                  chunkId: citation.chunk_id,
+                  highlightText: citation.quote_snapshot,
+                  location: citation.source_location,
+                })
+              }
               title={label}
               aria-label={label}
               className={CITATION_BADGE}
             >
               {children}
-            </a>
+            </button>
           );
         }
         return (
@@ -196,7 +210,7 @@ export function MarkdownAnswer({
         );
       },
     };
-  }, [citations]);
+  }, [citations, openPreview]);
 
   return (
     <ReactMarkdown

@@ -15,6 +15,39 @@ interface Props {
   onClose: () => void;
 }
 
+function SearchIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      aria-hidden="true"
+      className="h-4 w-4"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="m16.5 16.5 4 4" />
+    </svg>
+  );
+}
+
+function ClearIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      aria-hidden="true"
+      className="h-3.5 w-3.5"
+    >
+      <path d="m6 6 12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
 /**
  * “新建对话”先选资料集：会话必须挂在资料集下，直接跳走会让用户不知道
  * 回答到底基于哪些文件。选择后创建会话并进入对话页。
@@ -23,7 +56,9 @@ export function NewConversationDialog({ open, collections, loading, error = null
   const navigate = useNavigate();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const firstOptionRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useFocusTrap(panelRef, open);
@@ -33,6 +68,8 @@ export function NewConversationDialog({ open, collections, loading, error = null
       return;
     }
     setFailure(null);
+    // 每次打开都从完整列表开始，避免上次的搜索词把选项藏起来。
+    setQuery("");
     const timer = window.setTimeout(() => firstOptionRef.current?.focus(), 0);
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -49,6 +86,19 @@ export function NewConversationDialog({ open, collections, loading, error = null
   if (!open) {
     return null;
   }
+
+  // 只按资料集名称过滤：这个弹窗的用途是「选一个资料集」，数量多时靠名字最快。
+  const keyword = query.trim().toLowerCase();
+  const filtered = keyword
+    ? collections.filter((collection) =>
+        collection.name.toLowerCase().includes(keyword),
+      )
+    : collections;
+
+  const clearSearch = () => {
+    setQuery("");
+    searchRef.current?.focus();
+  };
 
   async function handlePick(collection: CollectionSummary) {
     setBusyId(collection.id);
@@ -71,7 +121,7 @@ export function NewConversationDialog({ open, collections, loading, error = null
         type="button"
         aria-label="关闭新建对话"
         onClick={onClose}
-        className="absolute inset-0 animate-fade cursor-default bg-ink/40 backdrop-blur-sm"
+        className="absolute inset-0 animate-fade cursor-default bg-black/40 backdrop-blur-sm"
       />
 
       <div
@@ -89,6 +139,54 @@ export function NewConversationDialog({ open, collections, loading, error = null
             选择一个资料集，回答只会引用该资料集里已建索引的文件。
           </p>
         </div>
+
+        {!loading && !error && collections.length > 0 ? (
+          <div className="shrink-0 border-b border-ink-line px-5 py-3">
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-mute">
+                <SearchIcon />
+              </span>
+              <input
+                ref={searchRef}
+                id="new-conversation-search"
+                type="text"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  // 有搜索词时 Esc 先清空，再按一次才关闭弹窗。
+                  if (event.key === "Escape" && query) {
+                    event.stopPropagation();
+                    clearSearch();
+                  }
+                }}
+                placeholder="搜索资料集名称"
+                aria-label="搜索资料集"
+                aria-describedby="new-conversation-search-hint"
+                autoComplete="off"
+                className="field h-10 py-0 pl-9 pr-9 text-sm"
+              />
+              {query ? (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  aria-label="清空搜索"
+                  className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-ink-mute transition hover:bg-paper-deep hover:text-ink"
+                >
+                  <ClearIcon />
+                </button>
+              ) : null}
+            </div>
+            <p
+              id="new-conversation-search-hint"
+              className="mt-1.5 text-xs tabular-nums text-ink-mute"
+              aria-live="polite"
+            >
+              {keyword
+                ? `找到 ${filtered.length} 个资料集`
+                : `共 ${collections.length} 个资料集`}
+            </p>
+          </div>
+        ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {loading ? (
@@ -122,9 +220,23 @@ export function NewConversationDialog({ open, collections, loading, error = null
                 去新建资料集
               </Link>
             </div>
+          ) : filtered.length === 0 ? (
+            <div className="px-4 py-10 text-center">
+              <p className="text-sm font-semibold text-ink">没有匹配的资料集</p>
+              <p className="mt-2 text-sm leading-6 text-ink-soft">
+                「{query.trim()}」没有找到对应的资料集，换个关键词或清空搜索试试。
+              </p>
+              <button
+                type="button"
+                onClick={clearSearch}
+                className="btn btn-ghost mt-5 min-h-10 px-4 text-xs"
+              >
+                清空搜索
+              </button>
+            </div>
           ) : (
             <ul className="space-y-1">
-              {collections.map((collection, index) => (
+              {filtered.map((collection, index) => (
                 <li key={collection.id}>
                   <button
                     ref={index === 0 ? firstOptionRef : undefined}
@@ -167,7 +279,7 @@ export function NewConversationDialog({ open, collections, loading, error = null
         </div>
 
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-ink-line px-5 py-3">
-          <span className="text-[11px] text-ink-mute">会话可以随时在资料集里删除</span>
+          <span className="text-xs text-ink-mute">会话可以随时在资料集里删除</span>
           <button
             type="button"
             onClick={onClose}

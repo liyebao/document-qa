@@ -1,8 +1,9 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo } from "react";
 import type { Message } from "../api/types";
-import { copyText } from "../lib/clipboard";
-import { CitationCard } from "./CitationCard";
+import { useCopyState } from "../lib/clipboard";
+import { CitationList } from "./CitationList";
 import { MarkdownAnswer } from "./MarkdownAnswer";
+import { RetrievalTrace } from "./RetrievalTrace";
 
 function formatMessageTime(value: string): string {
   const date = new Date(value);
@@ -27,25 +28,7 @@ function ChatMessageBase({
   streaming?: boolean;
 }) {
   const isUser = message.role === "user";
-  const [copyState, setCopyState] = useState<"idle" | "done" | "error">("idle");
-  const timerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current !== null) {
-        window.clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
-
-  const handleCopy = useCallback(async () => {
-    const ok = await copyText(message.content);
-    setCopyState(ok ? "done" : "error");
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-    }
-    timerRef.current = window.setTimeout(() => setCopyState("idle"), 2000);
-  }, [message.content]);
+  const { copyState, copy } = useCopyState();
 
   // 时间与复制放在文字右下方，平时隐藏，靠近消息或键盘聚焦时才出现。
   const actions = (
@@ -53,7 +36,7 @@ function ChatMessageBase({
       <time dateTime={message.created_at}>{formatMessageTime(message.created_at)}</time>
       <button
         type="button"
-        onClick={() => void handleCopy()}
+        onClick={() => void copy(message.content)}
         aria-live="polite"
         className={`rounded-md px-1.5 py-0.5 transition hover:bg-paper-deep ${
           copyState === "done"
@@ -96,13 +79,16 @@ function ChatMessageBase({
       </div>
 
       <div className="ml-10 mt-2">
+        {message.retrieval_trace ? (
+          <RetrievalTrace trace={message.retrieval_trace} />
+        ) : null}
         {streaming ? (
           // 流式阶段只渲染纯文本：既避免半截 Markdown 标记裸露，也避免每个 delta 全量重解析。
-          <p className="whitespace-pre-wrap break-words text-sm leading-7 text-ink sm:text-[15px]">
+          <p className="whitespace-pre-wrap break-words text-sm leading-7 text-ink sm:text-ui-base">
             {message.content}
           </p>
         ) : (
-          <div className="break-words text-sm leading-7 text-ink sm:text-[15px]">
+          <div className="break-words text-sm leading-7 text-ink sm:text-ui-base">
             <MarkdownAnswer content={message.content} citations={message.citations} />
           </div>
         )}
@@ -119,20 +105,7 @@ function ChatMessageBase({
           </p>
         )}
 
-        {message.citations.length > 0 && (
-          <div className="mt-4">
-            <p className="text-xs font-semibold text-ink-mute">引用来源</p>
-            <div className="mt-2 space-y-2">
-              {message.citations.map((citation) => (
-                <CitationCard
-                  key={citation.id}
-                  citation={citation}
-                  index={citation.marker_index}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+        <CitationList citations={message.citations} />
       </div>
 
       {!streaming && <div className="ml-10 mt-1.5">{actions}</div>}

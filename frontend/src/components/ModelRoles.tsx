@@ -25,7 +25,7 @@ function RoleRow({
   onRoleChange,
 }: RoleRowProps) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-ink-line bg-white p-4">
+    <div className="flex flex-col gap-3 rounded-xl border border-ink-line bg-paper-card p-4">
       <div className="min-w-0">
         <p className="text-xs font-semibold text-ink-mute">{label}</p>
         <p className="mt-1 truncate text-sm font-semibold text-ink">
@@ -82,7 +82,7 @@ export function ModelRoles({ settings, busy, onRoleChange }: Props) {
           <h2 className="text-lg font-semibold text-ink">当前使用</h2>
           <p className="mt-1 text-sm text-ink-mute">检索和回答可以分别使用不同模型</p>
         </div>
-        <span className="rounded-full bg-white px-3 py-1.5 text-xs text-ink-mute shadow-sm">
+        <span className="rounded-full bg-paper-card px-3 py-1.5 text-xs text-ink-mute shadow-sm">
           {settings.effective_rerank
             ? `重排：${settings.effective_rerank.model}`
             : "重排未启用"}

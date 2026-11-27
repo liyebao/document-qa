@@ -47,6 +47,25 @@ export function SidebarSearch({ onNavigate, inputRef }: SidebarSearchProps) {
     }
   };
 
+  // 浏览器自动填充（密码管理器/表单记忆）不走用户操作，改 autocomplete 属性拦不住。
+  // 这里用两层防御：输入框先只读，用户真正按下指针或键盘后才可编辑；
+  // 再加一道兜底，挂载后短时间内出现的、没有输入痕迹的内容直接丢弃。
+  const [editable, setEditable] = useState(false);
+  const userTyped = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (userTyped.current) {
+        return;
+      }
+      setQuery((current) => (current ? "" : current));
+      setOpen(false);
+      setItems([]);
+      setStatus("idle");
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const trimmed = query.trim();
   const groups = useMemo(() => groupSearchItems(items), [items]);
   const flatItems = useMemo(() => groups.flatMap((group) => group.items), [groups]);
@@ -163,8 +182,10 @@ export function SidebarSearch({ onNavigate, inputRef }: SidebarSearchProps) {
           type="search"
           name="sidebar-search"
           value={query}
-          // Chrome 会无视 autocomplete="off"，把保存的邮箱/账号填进任何文本框。
-          // new-password 是唯一被浏览器当作"绝不自动填充"的取值，配合密码管理器忽略标记使用。
+          // 只读直到用户主动操作：浏览器不会填充 readOnly 字段，这是唯一稳定的拦截点。
+          readOnly={!editable}
+          // Chrome 会无视 autocomplete="off"，把保存的邮箱/账号填进任何文本框；
+          // 这两个属性仍然保留，配合密码管理器忽略标记减少误填。
           autoComplete="new-password"
           data-lpignore="true"
           data-1p-ignore="true"
@@ -175,17 +196,35 @@ export function SidebarSearch({ onNavigate, inputRef }: SidebarSearchProps) {
           aria-controls={listboxId}
           aria-autocomplete="list"
           aria-activedescendant={activeId}
+          onPointerDown={() => setEditable(true)}
           onChange={(event) => {
+            // 自动填充的 inputType 是 insertReplacementText；用户输入是 insertText、
+            // paste、deleteContentBackward 等。只丢弃前者，不影响正常输入。
+            const { inputType } = event.nativeEvent as InputEvent;
+            if (inputType === "insertReplacementText") {
+              setQuery("");
+              setOpen(false);
+              return;
+            }
+            userTyped.current = true;
+            setEditable(true);
             setQuery(event.target.value);
             setOpen(true);
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            setEditable(true);
+            setOpen(true);
+          }}
           onBlur={() => {
             // 延迟收起，给「点击结果」留出时间，否则 blur 先触发会把面板拆掉。
             window.setTimeout(() => setOpen(false), 120);
           }}
-          onKeyDown={handleKeyDown}
-          className="field w-full py-1.5 pl-8 pr-2 text-[13px]"
+          onKeyDown={(event) => {
+            // 键盘用户可能直接 Tab 进来打字，先解锁再处理导航键。
+            setEditable(true);
+            handleKeyDown(event);
+          }}
+          className="field w-full py-1.5 pl-8 pr-2 text-ui-sm"
         />
       </div>
 
@@ -217,7 +256,7 @@ export function SidebarSearch({ onNavigate, inputRef }: SidebarSearchProps) {
 
             {groups.map((group) => (
               <div key={group.kind} className="pb-1">
-                <p className="px-2 py-1 text-[11px] font-semibold tracking-wide text-ink-mute">
+                <p className="px-2 py-1 text-xs font-semibold tracking-wide text-ink-mute">
                   {group.label}
                   <span className="ml-1 font-normal text-ink-soft">
                     {group.items.length}
@@ -243,11 +282,11 @@ export function SidebarSearch({ onNavigate, inputRef }: SidebarSearchProps) {
                           : "text-ink hover:bg-paper-deep"
                       }`}
                     >
-                      <span className="w-full truncate text-[13px] font-medium">
+                      <span className="w-full truncate text-ui-sm font-medium">
                         {item.label}
                       </span>
                       {item.sublabel ? (
-                        <span className="w-full truncate text-[11px] text-ink-mute">
+                        <span className="w-full truncate text-xs text-ink-mute">
                           {item.sublabel}
                         </span>
                       ) : null}

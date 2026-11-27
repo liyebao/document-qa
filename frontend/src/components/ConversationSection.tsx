@@ -27,7 +27,7 @@ export function ConversationSection({ conversations, onCreate, onDelete }: Props
       {conversations.length === 0 ? (
         <div className="mt-4 rounded-xl border border-dashed border-ink-line bg-paper/70 px-5 py-10 text-center">
           <div
-            className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-white text-lg font-bold text-accent shadow-sm"
+            className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-paper-card text-lg font-bold text-accent shadow-sm"
             aria-hidden="true"
           >
             ✦
