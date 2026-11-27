@@ -49,6 +49,9 @@ Thumbs.db
 # 评测私有数据
 evaluation/reports/*
 !evaluation/reports/.gitkeep
+evaluation/dataset*.jsonl
+*.pem
+*.key
 
 # 本地视觉验证产物（截图与 CDP 脚本）
 .shots/

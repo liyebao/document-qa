@@ -1,6 +1,28 @@
 from app.services.parsers.pdf import _blocks_from_page, _heading_for
 
 
+def test_inline_items_survive_as_body_text() -> None:
+    """「（一）……」既是层级也是正文，不能被标题识别整行吞掉。"""
+    stack: list[tuple[int, str]] = []
+    text = "\n".join(
+        [
+            "第三十三条 监事会、监事依法行使章程规定的下列职权：",
+            "（一）监督理事会、执行机构开展业务情况，检查基金会财务",
+            "和会计资料；",
+            "（二）对违反法律、法规、基金会章程或者理事会决议的理事",
+            "长、副理事长、秘书长、理事，向理事会提出免职的建议；",
+        ]
+    )
+
+    blocks = _blocks_from_page(text, page_number=11, stack=stack)
+    body = "\n".join(block.text for block in blocks)
+
+    assert "（一）监督理事会" in body
+    assert "和会计资料；" in body
+    assert "（二）对违反法律" in body
+    assert "向理事会提出免职的建议；" in body
+
+
 def test_heading_levels_follow_numbering_style() -> None:
     assert _heading_for("第一章 项目背景", []) == (1, "第一章 项目背景")
     assert _heading_for("第2节 适用范围", []) == (2, "第2节 适用范围")

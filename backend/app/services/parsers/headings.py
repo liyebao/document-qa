@@ -77,6 +77,16 @@ def push_heading(stack: list[tuple[int, str]], level: int, title: str) -> None:
     stack.append((level, title))
 
 
+def is_inline_heading(line: str) -> bool:
+    """「（一）……」这类编号是条内分项，不是章节标题。
+
+    它们既标识层级，本身又是正文：法律条文的「（一）监督理事会……」下一行
+    往往接着「和会计资料；」。按纯标题处理会把分项首行整段丢掉，所以解析器
+    要把它同时写进标题栈和正文。
+    """
+    return bool(_CN_SUB.match(line.strip()))
+
+
 def heading_path(stack: list[tuple[int, str]]) -> str:
     return " > ".join(title for _, title in stack)
 
@@ -125,6 +135,9 @@ def paragraphs_to_blocks(
         if heading is not None:
             flush()
             push_heading(stack, *heading)
+            # 与 PDF 一致：条内分项要保留在正文里，否则分项首行会整段丢失。
+            if is_inline_heading(text):
+                buffer.append(text)
             continue
         buffer.append(text)
 

@@ -6,6 +6,7 @@ from app.core.config import get_settings
 from app.models.collection import Collection
 from app.models.conversation import Conversation
 from app.models.model_provider_config import ModelProviderConfig
+from app.services.locations import source_location
 
 if TYPE_CHECKING:
     from app.services.agent import DocumentQAAgent
@@ -60,6 +61,8 @@ def log_retrieval_trace(
         "diversity_applied": bool(getattr(agent, "diversity_applied", False)),
         "expansion_rounds": int(getattr(agent, "expansion_rounds", 0)),
         "expansion_queries": int(getattr(agent, "expansion_queries", 0)),
+        "full_scan_chunks": int(getattr(agent, "full_scan_chunks", 0)),
+        "reference_chunks": int(getattr(agent, "reference_chunks", 0)),
         "document_filter_active": document_filter_active,
         "document_filter_count": document_filter_count,
         "document_scope_explicit": document_scope_explicit,
@@ -90,3 +93,34 @@ def log_retrieval_trace(
     if error:
         payload["error"] = error
     trace_logger.info("retrieval_trace %s", json.dumps(payload, ensure_ascii=False))
+
+
+def build_retrieval_trace(agent: "DocumentQAAgent") -> dict:
+    """构造可展示的精简检索轨迹，不含片段正文、分数与密钥。
+
+    查询词去重后展示，文档按首次进入证据的顺序展示并带引用编号，
+    前端据此呈现「已检索 / 已浏览」，同时随消息落库供历史会话回看。
+    """
+    queries: list[str] = []
+    documents: list[dict] = []
+    seen_documents: set[tuple[str, str]] = set()
+    for trace in agent.traces:
+        query = (trace.query or "").strip()
+        if query and query not in queries:
+            queries.append(query)
+    for item in agent.evidence:
+        name = item.document.filename
+        location = source_location(item.chunk)
+        key = (name, location)
+        if key in seen_documents:
+            continue
+        seen_documents.add(key)
+        documents.append({"name": name, "location": location, "marker": item.index})
+    return {
+        "queries": queries[:8],
+        "documents": documents[:8],
+        "searches": len(agent.traces),
+        "expanded": sum(1 for trace in agent.traces if trace.query_index < 0),
+        "full_scan_chunks": getattr(agent, "full_scan_chunks", 0),
+        "reference_chunks": getattr(agent, "reference_chunks", 0),
+    }

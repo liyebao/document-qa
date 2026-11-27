@@ -72,6 +72,7 @@ class MessageOut(BaseModel):
     status: str
     created_at: datetime
     citations: list[CitationOut] = []
+    retrieval_trace: dict = Field(default_factory=dict)
 
 
 class ConversationDetail(ConversationOut):

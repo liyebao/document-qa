@@ -81,6 +81,19 @@ class ProviderRoleRequest(BaseModel):
     role: ModelRole
 
 
+class ProviderModelsOut(BaseModel):
+    """本地服务商实际可用的模型清单。
+
+    reachable=False 表示连不上本地服务（例如未启动 Ollama），此时前端沿用
+    静态推荐清单，不把它当成"一个模型都没有"。
+    """
+
+    provider_key: str
+    reachable: bool
+    installed: list[str] = []
+    message: str = ""
+
+
 class ConnectionTestResult(BaseModel):
     ok: bool
     embedding_ok: bool

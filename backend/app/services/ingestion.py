@@ -1,6 +1,5 @@
 import hashlib
 import logging
-import re
 import struct
 import uuid
 import zipfile
@@ -15,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import AppError
+from app.core.text_utils import clean_filename_part
 from app.db.session import SessionLocal
 from app.models.chunk import Chunk
 from app.models.chunk_term import ChunkTerm
@@ -28,7 +28,12 @@ from app.models.document import (
     DOCUMENT_STATUS_READY,
     Document,
 )
-from app.schemas.document import ChunkContextOut, ChunkSnippet
+from app.schemas.document import (
+    ChunkContextOut,
+    ChunkSnippet,
+    DocumentPreviewBlock,
+    DocumentPreviewOut,
+)
 from app.services import embeddings, storage
 from app.services.chunking import chunk_blocks
 from app.services.locations import source_location
@@ -235,13 +240,8 @@ def create_document_from_stream(
     return _store_streamed(db, collection, filename, source)
 
 
-_UNSAFE_TITLE = re.compile(r'[\\/:*?"<>|\r\n\t]+')
-
-
 def _clean_title(title: str, fallback: str) -> str:
-    cleaned = _UNSAFE_TITLE.sub(" ", title or "").strip()
-    cleaned = re.sub(r"\s+", " ", cleaned)[:80].strip()
-    return cleaned or fallback
+    return clean_filename_part(title, fallback)
 
 
 def create_text_document(
@@ -272,53 +272,6 @@ def create_url_document(db: Session, collection: Collection, url: str) -> Docume
         source_url=page.final_url,
         fetched_at=datetime.now(UTC),
     )
-
-
-def replace_document(
-    db: Session, document: Document, filename: str | None, content: bytes
-) -> Document:
-    if not document.is_current:
-        raise AppError("DOCUMENT_NOT_CURRENT", "只能替换当前版本的文件", 409)
-    if not filename:
-        raise AppError(
-            "UNSUPPORTED_FORMAT",
-            f"文件名为空；仅支持 {storage.SUPPORTED_FORMATS_LABEL} 文件",
-            415,
-        )
-    safe_name, file_format = _validate_upload(filename, content)
-    checksum = _checksum(content)
-    if _find_duplicate(db, document.collection_id, checksum) is not None:
-        raise AppError("DUPLICATE_FILE", "资料集中已存在内容相同的文件", 409)
-
-    collection = db.get(Collection, document.collection_id)
-    if collection is None:
-        raise AppError("NOT_FOUND", "资料集不存在", 404)
-
-    new_document, path = _new_document(
-        collection,
-        safe_name,
-        file_format,
-        checksum,
-        version=document.version + 1,
-        supersedes_id=document.id,
-        source_type=document.source_type,
-        source_url=document.source_url,
-        fetched_at=document.fetched_at,
-    )
-    try:
-        storage.save_bytes(path, content)
-    except OSError as exc:
-        raise AppError("INTERNAL_ERROR", "文件保存失败，请重试", 500) from exc
-
-    db.add(new_document)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        storage.delete_stored_file(str(path))
-        raise AppError("DUPLICATE_FILE", "资料集中已存在内容相同的文件", 409) from exc
-    db.refresh(new_document)
-    return new_document
 
 
 def replace_document_from_stream(
@@ -381,6 +334,40 @@ def get_chunk_context(
         chunk=snippet(chunk),
         previous=snippet(previous) if previous is not None else None,
         next=snippet(following) if following is not None else None,
+    )
+
+
+# 预览上限：够看清一份长文档的主体，又不至于让浏览器渲染几千个块。
+_PREVIEW_MAX_BLOCKS = 400
+
+
+def build_document_preview(db: Session, document: Document) -> DocumentPreviewOut:
+    """按顺序返回解析后的片段，供抽屉内预览与引用高亮。
+
+    只读已经入库的 chunk，不重新解析原文件，因此打开速度与文档大小无关。
+    """
+    rows = db.scalars(
+        select(Chunk)
+        .where(Chunk.document_id == document.id)
+        .order_by(Chunk.ordinal)
+        .limit(_PREVIEW_MAX_BLOCKS + 1)
+    ).all()
+    truncated = len(rows) > _PREVIEW_MAX_BLOCKS
+    blocks = [
+        DocumentPreviewBlock(
+            chunk_id=item.id,
+            ordinal=item.ordinal,
+            source_location=source_location(item),
+            text=item.text,
+        )
+        for item in rows[:_PREVIEW_MAX_BLOCKS]
+    ]
+    return DocumentPreviewOut(
+        document_id=document.id,
+        document_name=document.filename,
+        format=document.format,
+        truncated=truncated,
+        blocks=blocks,
     )
 
 
@@ -574,7 +561,7 @@ def _ingest_document(db: Session, document_id: uuid.UUID) -> None:
         overlap_tokens=settings.chunk_overlap_tokens,
         # 幻灯片一页就是一个知识点，按标题切块，不让两页拼进同一块。
         heading_split_tokens=0 if document.format in _SLIDE_FORMATS else None,
-        # 片段脱离原文还要能自证归属：文档名进检索面包屑。
+        # 片段脱离原文后还要能自证归属：文档名进检索面包屑。
         document_title=document.filename,
     )
     if not chunks:

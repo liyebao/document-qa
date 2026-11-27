@@ -12,6 +12,7 @@ from app.schemas.settings import (
     ModelProviderConfigCreate,
     ModelProviderConfigOut,
     ModelProviderSettingsOut,
+    ProviderModelsOut,
     ProviderRoleRequest,
 )
 from app.services import model_provider
@@ -45,6 +46,22 @@ def set_model_provider_role(
     _: None = Depends(settings_rate_limit),
 ) -> ModelProviderSettingsOut:
     return model_provider.set_preferred_provider(db, user, config_id, payload.role)
+
+
+@router.get("/model-providers/{provider_key}/models", response_model=ProviderModelsOut)
+def list_provider_models(
+    provider_key: str,
+    user: User = Depends(get_current_user),
+    _: None = Depends(settings_rate_limit),
+) -> ProviderModelsOut:
+    """本地服务商实际已下载的模型；云端服务商返回不可探测。"""
+    reachable, installed, message = model_provider.list_installed_models(provider_key)
+    return ProviderModelsOut(
+        provider_key=provider_key,
+        reachable=reachable,
+        installed=installed,
+        message=message,
+    )
 
 
 @router.post("/model-providers/{config_id}/test", response_model=ConnectionTestResult)

@@ -1,21 +1,13 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.text_utils import escape_like
 from app.models.collection import Collection
 from app.models.conversation import Conversation
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.search import SearchItem
 from app.services.conversations import conversation_activity_column
-
-
-def escape_like(term: str) -> str:
-    """把用户输入转成 LIKE 字面量：先转义反斜杠，再转义 % 与 _。
-
-    反斜杠必须最先处理，否则后面补的转义符会被二次转义；调用方统一用
-    ilike(pattern, escape="\\")，所以这里只需产出含转义符的片段。
-    """
-    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _contains(term: str) -> str:

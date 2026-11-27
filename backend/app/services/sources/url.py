@@ -10,6 +10,7 @@ import httpx
 import trafilatura
 
 from app.core.errors import AppError
+from app.core.text_utils import clean_filename_part
 
 _MAX_BYTES = 5 * 1024 * 1024
 _MAX_REDIRECTS = 3
@@ -18,7 +19,6 @@ _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/125.0 Safari/537.36 KnowledgeBaseBot/0.1"
 )
-_UNSAFE_FILENAME = re.compile(r'[\\/:*?"<>|\r\n\t]+')
 _TITLE_PATTERN = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
@@ -209,6 +209,4 @@ def fetch_page(url: str) -> FetchedPage:
 
 
 def build_markdown_filename(title: str, fallback: str = "网页") -> str:
-    cleaned = _UNSAFE_FILENAME.sub(" ", title or "").strip()
-    cleaned = re.sub(r"\s+", " ", cleaned)[:80].strip()
-    return f"{cleaned or fallback}.md"
+    return f"{clean_filename_part(title, fallback)}.md"

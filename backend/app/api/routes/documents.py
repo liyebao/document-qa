@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_collection, require_document, upload_rate_limit
@@ -13,11 +13,13 @@ from app.models.document import Document
 from app.schemas.document import (
     ChunkContextOut,
     DocumentOut,
+    DocumentPreviewOut,
     DocumentUpdate,
     TextDocumentCreate,
     UrlDocumentCreate,
 )
-from app.services import ingestion, jobs, storage
+from app.services import ingestion, jobs, rendering, storage
+from app.services.parsers import ParseError
 
 router = APIRouter(prefix="/api", tags=["documents"])
 
@@ -170,6 +172,54 @@ def get_document_file(document: Document = Depends(require_document)) -> FileRes
         content_disposition_type="attachment" if download_only else "inline",
         headers={"Cache-Control": "private, max-age=60"},
     )
+
+
+# iframe 内只允许内联样式：禁止脚本、外部资源，避免上传内容在同源下执行。
+_PREVIEW_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:;"
+)
+
+
+def _preview_error_page(message: str) -> str:
+    return (
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\" />"
+        "<style>body{margin:0;padding:32px;font-family:system-ui,'Microsoft YaHei',sans-serif;"
+        "font-size:14px;color:#71809A;line-height:1.8}</style></head>"
+        f"<body>{message}</body></html>"
+    )
+
+
+@router.get("/documents/{document_id}/render", response_class=HTMLResponse)
+def render_document_preview(
+    document: Document = Depends(require_document),
+) -> HTMLResponse:
+    """按原文件重新排版成 HTML，供抽屉内预览。
+
+    和 /preview 的区别：那个返回入库后的片段文本，这个从原文件重新生成
+    带标题层级、表格、分页的页面，接近"打开原文件"的效果。
+    """
+    path = storage.stored_path(document.storage_path)
+    if not path.is_file():
+        return HTMLResponse(
+            _preview_error_page("原文件不存在或已被清理"), status_code=404
+        )
+    if document.format in {"html", "htm"}:
+        # 上传的 HTML 本身就是"原文"，交给 sandbox iframe 隔离渲染。
+        content = path.read_text(encoding="utf-8", errors="replace")
+        return HTMLResponse(content=content, headers={"Content-Security-Policy": _PREVIEW_CSP})
+    try:
+        content = rendering.render_document(path, document.format)
+    except ParseError as exc:
+        return HTMLResponse(_preview_error_page(str(exc)), status_code=422)
+    return HTMLResponse(content=content, headers={"Content-Security-Policy": _PREVIEW_CSP})
+
+
+@router.get("/documents/{document_id}/preview", response_model=DocumentPreviewOut)
+def get_document_preview(
+    document: Document = Depends(require_document), db: Session = Depends(get_db)
+) -> DocumentPreviewOut:
+    """返回解析后的片段序列，供抽屉内预览与引用定位。"""
+    return ingestion.build_document_preview(db, document)
 
 
 @router.get(

@@ -1,11 +1,12 @@
 """回答生成后的质量自检。
 
 只读检查回答正文与被引片段，发现问题就返回一段描述交给日志，不改写回答内容。
-覆盖两类在真实问答里出现过的问题：
+覆盖三类在真实问答里出现过的问题：
 
 1. 片段里的相对指代（「见下一行说明」）被原样搬进独立的表格或段落——脱离原表之后，
    这句话既指不到东西，又会被当作结论读；
-2. 代码块里的命令与原文不一致（改写参数、把「报错示例」当成「正确示例」）。
+2. 代码块里的命令与原文不一致（改写参数、把「报错示例」当成「正确示例」）；
+3. 证据前的检索标记（「紧接上文：[2]」）被写进答案，暴露了内部处理细节。
 """
 
 from __future__ import annotations
@@ -15,12 +16,15 @@ import re
 __all__ = [
     "check_answer",
     "dangling_references",
+    "leaked_markers",
     "unsupported_code_lines",
 ]
 
 _DANGLING_REFERENCE = re.compile(
     r"见(?:下一行|上一行|下一段|上一段|下文|上文|下表|上表|下图|上图)"
 )
+# 证据前的「紧接上文：[N]」「下文见：[N]」「同文另见：」是检索标记，写进答案就是内部词泄漏。
+_INTERNAL_MARKER = re.compile(r"紧接上文[:：]|下文见[:：]|同文另见[:：]|关联问题[:：]")
 _FENCED_CODE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
 _COMMENT_PREFIXES = ("--", "#", "//")
 
@@ -32,6 +36,11 @@ def _normalize(text: str) -> str:
 def dangling_references(answer: str) -> list[str]:
     """返回回答里出现的相对指代，去重后按字典序排列。"""
     return sorted({match.group(0) for match in _DANGLING_REFERENCE.finditer(answer)})
+
+
+def leaked_markers(answer: str) -> list[str]:
+    """返回回答里被原样带出的检索标记。"""
+    return sorted({match.group(0) for match in _INTERNAL_MARKER.finditer(answer)})
 
 
 def unsupported_code_lines(answer: str, evidence_texts: list[str]) -> list[str]:
@@ -49,11 +58,15 @@ def unsupported_code_lines(answer: str, evidence_texts: list[str]) -> list[str]:
 
 
 def check_answer(answer: str, evidence_texts: list[str]) -> list[str]:
-    """把两类检查合成一份可读的警告列表；空列表表示没发现问题。"""
+    """把三类检查合成一份可读的警告列表；空列表表示没发现问题。"""
     warnings = [
         f"悬空指代：{reference}（原文的相对位置在答案里已经失效）"
         for reference in dangling_references(answer)
     ]
+    warnings.extend(
+        f"内部标记泄漏：{marker}（应只用于区分依据，不能写进答案）"
+        for marker in leaked_markers(answer)
+    )
     warnings.extend(
         f"代码行不在被引片段里：{line[:80]}"
         for line in unsupported_code_lines(answer, evidence_texts)

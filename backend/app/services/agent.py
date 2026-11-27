@@ -10,12 +10,14 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.secrets import read_secret
+from app.core.text_utils import normalize_query as _normalize
 from app.models.chunk import Chunk
 from app.models.collection import Collection
 from app.models.document import DOCUMENT_STATUS_READY, Document
 from app.models.model_provider_config import ModelProviderConfig
-from app.services import embeddings, model_provider
+from app.services import embeddings, model_provider, query_intent
 from app.services.locations import source_location
+from app.services.retrieval import full_doc, reference_fill
 from app.services.retrieval.bm25 import bm25_search
 from app.services.retrieval.diversity import mmr_select
 from app.services.retrieval.expansion import build_expansion_prompt, parse_terms
@@ -32,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 # 证据扩展产生的检索不计入任何子问题，用 -1 标记，避免污染子问题覆盖率。
 EXPANSION_QUERY_INDEX = -1
+# 按编号补证同理；能对上某个子问题时仍用真实编号，对不上才落到这里。
+REFERENCE_QUERY_INDEX = -2
 EXPANSION_SNIPPET_CHARS = 400
 EXPANSION_SOURCE_LIMIT = 3
 
@@ -44,6 +48,11 @@ class EvidenceItem:
     rrf_score: float
     rerank_score: float | None = None
     query_indices: set[int] = field(default_factory=set)
+    # 同一份内容还出现在哪些文件里：重复上传时只保留一条正文，
+    # 但来源要如实列出，否则回答看起来只依据了一个文件。
+    also_in: set[str] = field(default_factory=set)
+    # 分页把条文切成两段时，标记本条紧接哪一处依据；否则后段没有条号，模型认不出归属。
+    continues: int | None = None
 
 
 @dataclass
@@ -55,6 +64,30 @@ class SearchTrace:
     vector_candidates: list[str]
     keyword_candidates: list[str]
     fused: list[dict]
+
+
+@dataclass
+class _FillBudget:
+    """按编号补证的预算：只限制总条数与总字符数。
+
+    早先还限制单文件条数，但一个问题点名 3 条、而它们都在同一份条例里时，
+    单文件上限会先把预算用完，最后一条的承接段反而补不进来；总预算已经
+    足够约束上下文长度，不再按文件截断。
+    """
+
+    max_chunks: int
+    max_chars: int
+    chunks: int = 0
+    chars: int = 0
+
+    def allow(self, length: int) -> bool:
+        if self.chunks >= self.max_chunks:
+            return False
+        return self.chars + length <= self.max_chars
+
+    def consume(self, length: int) -> None:
+        self.chunks += 1
+        self.chars += length
 
 
 def ready_documents(
@@ -104,11 +137,6 @@ def _truncate(text: str, limit: int) -> str:
     return cleaned if len(cleaned) <= limit else cleaned[:limit] + "…"
 
 
-def _normalize(text: str) -> str:
-    """查询去重口径：折叠空白并忽略大小写。"""
-    return re.sub(r"\s+", " ", text).strip().lower()
-
-
 class DocumentQAAgent:
     """单 Agent：只暴露一个由后端注入用户与资料集范围的 search_documents 工具。
 
@@ -144,6 +172,8 @@ class DocumentQAAgent:
         self.diversity_applied = False
         self.expansion_rounds = 0
         self.expansion_queries = 0
+        self.full_scan_chunks = 0
+        self.reference_chunks = 0
         self.evidence: list[EvidenceItem] = []
         self.traces: list[SearchTrace] = []
         self._ranked_lists: list[list[uuid.UUID]] = []
@@ -259,6 +289,27 @@ class DocumentQAAgent:
         )
         return [chunk_id for chunk_id, _ in fused]
 
+    def search_planned_queries(self, queries: list[str], executed: dict[str, int]) -> None:
+        """按子问题逐条检索，并补一次规范化问法。
+
+        同义的问法（「第71条第2项」「71条第二项」「article 71 item 2」）经
+        query_intent 归一后落到同一标准问法；补这一次能让召回不受措辞影响，
+        又不会给每个子问题引入新的编号。executed 与工具循环共用同一张表。
+        """
+        settings = get_settings()
+        for index, query in enumerate(queries):
+            variants = (
+                query_intent.expand_queries(query, limit=settings.query_variants_max)
+                if settings.query_variants_enabled
+                else [query]
+            )
+            for text in variants:
+                key = _normalize(text)
+                if key in executed:
+                    continue
+                self.search_documents(text, query_index=index)
+                executed[key] = index
+
     def format_search_preview(self, chunk_ids: list[uuid.UUID], limit: int = 3) -> str:
         """给 Agent 的检索预览，不分配最终引用编号。"""
         lines: list[str] = []
@@ -286,29 +337,32 @@ class DocumentQAAgent:
             candidates = self._apply_diversity(candidates)
 
         evidence: list[EvidenceItem] = []
-        seen_fingerprints: set[str] = set()
+        seen_fingerprints: dict[str, EvidenceItem] = {}
         for chunk_id, score in candidates:
             if len(evidence) >= settings.retrieval_top_k:
                 break
             entry = self._chunks.get(chunk_id)
             if entry is None:
                 continue
-            # 同一份内容重复入库时，fingerprint 相同；只保留排名最高的一份。
+            # 同一份内容重复入库时，fingerprint 相同；只保留排名最高的一份，
+            # 但要把另一份文件的文件名记在证据上，回答才能说明它也有这份内容。
             fingerprint = entry[0].fingerprint
             if fingerprint:
-                if fingerprint in seen_fingerprints:
+                kept = seen_fingerprints.get(fingerprint)
+                if kept is not None:
+                    self._note_duplicate(kept, entry[1])
                     continue
-                seen_fingerprints.add(fingerprint)
-            evidence.append(
-                EvidenceItem(
-                    index=len(evidence) + 1,
-                    chunk=entry[0],
-                    document=entry[1],
-                    rrf_score=score,
-                    rerank_score=self.rerank_scores.get(chunk_id),
-                    query_indices=set(self._chunk_queries.get(chunk_id, set())),
-                )
+            item = EvidenceItem(
+                index=len(evidence) + 1,
+                chunk=entry[0],
+                document=entry[1],
+                rrf_score=score,
+                rerank_score=self.rerank_scores.get(chunk_id),
+                query_indices=set(self._chunk_queries.get(chunk_id, set())),
             )
+            if fingerprint:
+                seen_fingerprints[fingerprint] = item
+            evidence.append(item)
         self.evidence = evidence
         return evidence
 
@@ -517,6 +571,212 @@ class DocumentQAAgent:
         self.expansion_queries += len(executed)
         return executed
 
+    def expand_evidence_for_full_document(self) -> int:
+        """补齐命中文档的原文序列，供计数/全量类问题核对首尾与缺口。"""
+        settings = get_settings()
+        document_ids = list(dict.fromkeys(item.document.id for item in self.evidence))
+        rows = full_doc.fetch_document_chunks(
+            self.db,
+            collection_id=self.collection.id,
+            document_ids=document_ids,
+            limit=max(1, settings.full_scan_max_chunks),
+        )
+        existing = {item.chunk.id for item in self.evidence}
+        by_fingerprint = {
+            item.chunk.fingerprint: item
+            for item in self.evidence
+            if item.chunk.fingerprint
+        }
+        total_chars = sum(len(item.chunk.text or "") for item in self.evidence)
+        added = 0
+        for chunk, document in rows:
+            if chunk.id in existing:
+                continue
+            if chunk.fingerprint and chunk.fingerprint in by_fingerprint:
+                self._note_duplicate(by_fingerprint[chunk.fingerprint], document)
+                continue
+            length = len(chunk.text or "")
+            if total_chars + length > settings.full_scan_max_chars:
+                break
+            self._chunks[chunk.id] = (chunk, document)
+            self._chunk_queries.setdefault(chunk.id, set()).add(EXPANSION_QUERY_INDEX)
+            item = EvidenceItem(
+                index=len(self.evidence) + 1,
+                chunk=chunk,
+                document=document,
+                rrf_score=0.0,
+                query_indices={EXPANSION_QUERY_INDEX},
+            )
+            self.evidence.append(item)
+            existing.add(chunk.id)
+            if chunk.fingerprint:
+                by_fingerprint[chunk.fingerprint] = item
+            total_chars += length
+            added += 1
+        self.full_scan_chunks += added
+        return added
+
+    def fill_missing_references(self, question: str) -> int:
+        """问题点名结构编号时，把证据里缺失的编号原文补齐。
+
+        编号在资料集中可能出现在多份文件里，也可能被分页切成「编号 + 引导句」
+        和分项列举两段；检索的 top_k 只能命中其中一部分，模型就会答「无法确认」。
+        这里统一按「文件 + 编号」判断缺什么：先补缺失编号的原文，再按窗口补齐
+        被切开的后续片段，并挂到问该编号的子问题上。
+        """
+        settings = get_settings()
+        if not settings.reference_fill_enabled:
+            return 0
+        intent = query_intent.understand(question)
+        references = list(intent.references)
+        if not references or not self.evidence:
+            return 0
+
+        span = max(1, settings.reference_fill_continuation_span)
+        # 点名到「第Y项」时，整条原文常跨好几个片段，按窗口取回而不是只看冒号。
+        force_window = bool(intent.items)
+        if force_window:
+            span = max(span, 2)
+        covered, seeds = self._reference_seeds(references, force=force_window)
+        budget = _FillBudget(
+            max_chunks=settings.reference_fill_max_chunks,
+            max_chars=settings.reference_fill_max_chars,
+        )
+        existing = {item.chunk.id for item in self.evidence}
+        added = 0
+
+        rows = reference_fill.fetch_reference_chunks(
+            self.db,
+            collection_id=self.collection.id,
+            references=references,
+            document_ids=self.document_ids,
+            limit=budget.max_chunks * 3,
+        )
+        for chunk, document in rows:
+            text = chunk.text or ""
+            missing = reference_fill.references_in(text, references) - covered.get(
+                document.id, set()
+            )
+            if not missing or chunk.id in existing:
+                continue
+            if not budget.allow(len(text)):
+                continue
+            query_indices = self._link_queries(text, sorted(missing)) or {
+                REFERENCE_QUERY_INDEX
+            }
+            self._add_reference_evidence(chunk, document, query_indices, None)
+            covered.setdefault(document.id, set()).update(missing)
+            existing.add(chunk.id)
+            budget.consume(len(text))
+            added += 1
+            if force_window or reference_fill.needs_continuation(text):
+                seeds.append((chunk, set(query_indices), len(self.evidence)))
+
+        for chunk, document in reference_fill.fetch_continuation_chunks(
+            self.db,
+            collection_id=self.collection.id,
+            seeds=[(seed.document_id, seed.ordinal) for seed, _, _ in seeds],
+            span=span,
+        ):
+            if chunk.id in existing:
+                continue
+            if not budget.allow(len(chunk.text or "")):
+                continue
+            query_indices, continues = self._continuation_source(chunk, seeds, span)
+            self._add_reference_evidence(
+                chunk,
+                document,
+                query_indices or {REFERENCE_QUERY_INDEX},
+                continues,
+            )
+            existing.add(chunk.id)
+            budget.consume(len(chunk.text or ""))
+            added += 1
+
+        self.reference_chunks += added
+        return added
+
+    def _reference_seeds(
+        self, references: list[reference_fill.Reference], *, force: bool = False
+    ) -> tuple[dict[uuid.UUID, set[str]], list[tuple[Chunk, set[int], int]]]:
+        """统计「文件 + 编号」覆盖度，并挑出需要接续的片段作为承接起点。"""
+        covered: dict[uuid.UUID, set[str]] = {}
+        seeds: list[tuple[Chunk, set[int], int]] = []
+        for item in self.evidence:
+            text = item.chunk.text or ""
+            present = reference_fill.references_in(text, references)
+            if not present:
+                continue
+            covered.setdefault(item.document.id, set()).update(present)
+            if force or reference_fill.needs_continuation(text):
+                seeds.append(
+                    (
+                        item.chunk,
+                        set(item.query_indices) or {REFERENCE_QUERY_INDEX},
+                        item.index,
+                    )
+                )
+        return covered, seeds
+
+    @staticmethod
+    def _note_duplicate(item: EvidenceItem, document: Document) -> None:
+        """同一段原文也出现在另一份文件里：不重复占预算，但来源要如实记下。"""
+        if item.document.id != document.id:
+            item.also_in.add(document.filename)
+
+    def _add_reference_evidence(
+        self,
+        chunk: Chunk,
+        document: Document,
+        query_indices: set[int],
+        continues: int | None,
+    ) -> None:
+        self._chunks[chunk.id] = (chunk, document)
+        self._chunk_queries.setdefault(chunk.id, set()).update(query_indices)
+        self.evidence.append(
+            EvidenceItem(
+                index=len(self.evidence) + 1,
+                chunk=chunk,
+                document=document,
+                rrf_score=0.0,
+                query_indices=set(query_indices),
+                continues=continues,
+            )
+        )
+
+    def _continuation_source(
+        self,
+        chunk: Chunk,
+        seeds: list[tuple[Chunk, set[int], int]],
+        span: int,
+    ) -> tuple[set[int], int | None]:
+        """找承接片段最近的种子，返回它对应的子问题与种子编号。"""
+        best: tuple[int, set[int], int] | None = None
+        for seed, queries, index in seeds:
+            gap = chunk.ordinal - seed.ordinal
+            if seed.document_id != chunk.document_id or not 0 < gap <= span:
+                continue
+            if best is None or gap < best[0]:
+                best = (gap, queries, index)
+        if best is None:
+            return set(), None
+        return best[1], best[2]
+
+    def _link_queries(self, text: str, labels: list[str]) -> set[int]:
+        """把补证内容挂到问同一编号的子问题上；对不上时由调用方标记为无主证据。"""
+        wanted = set(labels)
+        linked: set[int] = set()
+        for trace in self.traces:
+            if trace.query_index < 0:
+                continue
+            traced = {
+                reference.label
+                for reference in reference_fill.extract_references(trace.query)
+            }
+            if traced & wanted:
+                linked.add(trace.query_index)
+        return linked
+
     def coverage(self, query_count: int) -> list[bool]:
         covered: set[int] = set()
         for item in self.evidence:
@@ -525,15 +785,37 @@ class DocumentQAAgent:
 
     def build_context(self) -> str:
         parts: list[str] = []
+        # 分页会把条文切成相邻两段；标出前后关系，模型才认得出没有条号的那半段。
+        positions = {
+            (item.document.id, item.chunk.ordinal): item.index for item in self.evidence
+        }
         for item in self.evidence:
             # 章节要带完整层级：只给最后一级时，模型分不清「5.1 用户管理」和
             # 「5.2 权限管理」，容易把后一节的注意事项并到前一节里。
             section = item.chunk.heading_path.strip()
             section_part = f"｜章节：{section}" if section else ""
+            linked = [str(index + 1) for index in sorted(item.query_indices) if index >= 0]
+            linked_part = f"｜关联问题：{'、'.join(linked)}" if linked else ""
+            previous = item.continues or positions.get(
+                (item.document.id, item.chunk.ordinal - 1)
+            )
+            continues_part = (
+                f"｜紧接上文：[{previous}]"
+                if previous and previous != item.index
+                else ""
+            )
+            following = positions.get((item.document.id, item.chunk.ordinal + 1))
+            following_part = f"｜下文见：[{following}]" if following else ""
+            also_part = ""
+            if item.also_in:
+                names = "、".join(f"《{name}》" for name in sorted(item.also_in))
+                also_part = f"｜同文另见：{names}"
             parts.append(
-                f"[{item.index}] 片段ID：{item.chunk.id}"
+                f"[{item.index}]"
                 f"｜文件：{item.document.filename}"
-                f"｜位置：{source_location(item.chunk)}{section_part}\n{item.chunk.text}"
+                f"｜位置：{source_location(item.chunk)}{section_part}{linked_part}"
+                f"{continues_part}{following_part}{also_part}"
+                f"\n{item.chunk.text}"
             )
         return "\n\n".join(parts)
 

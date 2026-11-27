@@ -28,7 +28,7 @@
 python -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 ```
 
-其余可调参数：`UPLOAD_DIR`、`LOG_DIR`、`MAX_UPLOAD_MB`、`CORS_ORIGINS`、`RETRIEVAL_CANDIDATES`、`RETRIEVAL_TOP_K`、`RETRIEVAL_MIN_SCORE`、`RRF_K`、`AGENT_MAX_TOOL_ROUNDS`、`AGENT_MAX_TOOL_CALLS`、`CHUNK_TARGET_TOKENS`、`CHUNK_MIN_TOKENS`、`CHUNK_OVERLAP_TOKENS`、`MODEL_HTTP_TIMEOUT`、`EMBEDDING_BATCH_SIZE`、`RATE_LIMIT_ASK_PER_MINUTE`、`RATE_LIMIT_UPLOAD_PER_MINUTE`、`RATE_LIMIT_REINDEX_PER_MINUTE`、`RATE_LIMIT_SETTINGS_PER_MINUTE`。
+其余可调参数：`UPLOAD_DIR`、`LOG_DIR`、`MAX_UPLOAD_MB`、`CORS_ORIGINS`、`RETRIEVAL_CANDIDATES`、`RETRIEVAL_TOP_K`、`RETRIEVAL_MIN_SCORE`、`RRF_K`、`QUERY_VARIANTS_ENABLED`、`QUERY_VARIANTS_MAX`、`REFERENCE_FILL_ENABLED`、`REFERENCE_FILL_MAX_CHUNKS`、`REFERENCE_FILL_MAX_CHARS`、`REFERENCE_FILL_CONTINUATION_SPAN`、`FULL_SCAN_MAX_CHUNKS`、`FULL_SCAN_MAX_CHARS`、`AGENT_MAX_TOOL_ROUNDS`、`AGENT_MAX_TOOL_CALLS`、`CHUNK_TARGET_TOKENS`、`CHUNK_MIN_TOKENS`、`CHUNK_OVERLAP_TOKENS`、`MODEL_HTTP_TIMEOUT`、`EMBEDDING_BATCH_SIZE`、`RATE_LIMIT_ASK_PER_MINUTE`、`RATE_LIMIT_UPLOAD_PER_MINUTE`、`RATE_LIMIT_REINDEX_PER_MINUTE`、`RATE_LIMIT_SETTINGS_PER_MINUTE`。
 
 后端会把结构化检索轨迹同时写入控制台和 `logs/backend.log`（5 MB 轮转，保留 3 份），`LOG_DIR` 可改目录；容器内由 Compose 固定为 `/app/logs` 并挂载到宿主 `./logs`。评测脚本依赖该日志补齐 Recall@K/MRR，不要把目录设为不可写。
 
@@ -43,6 +43,19 @@ python -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decod
 ```
 
 脚本会把全部旧版本密文重新加密到新版本（默认当前版本 + 1），并打印新版本号。随后把 `.env` 中的 `CREDENTIAL_ENCRYPTION_KEY` 和 `CREDENTIAL_ENCRYPTION_KEY_VERSION` 改为新值并重启后端。旧版本配置存在时脚本会提示，需要确认是否继续轮换。
+
+### 2.1 解析规则升级后重新入库
+
+修复 PDF/DOC 解析规则后，已有片段仍是旧结果；「重建索引」只重算向量，不会重新解析原文件。需要按新规则重跑入库：
+
+```powershell
+cd backend
+.\.venv\Scripts\python scripts\reingest_documents.py --collection <资料集 UUID>
+# 或只处理单份文档
+.\.venv\Scripts\python scripts\reingest_documents.py --document <文档 UUID>
+```
+
+脚本对每份文档执行「解析 → 切片 → 向量化 → 入库」，文档 ID 不变；历史消息的引用快照仍在，但片段级链接（`citations.chunk_id`）会因外键置空而断开，需要保留片段级引用记录的库请先备份。
 
 ## 3. 本地启动（推荐开发方式）
 
@@ -74,7 +87,7 @@ npm install
 npm run dev
 ```
 
-访问 `http://127.0.0.1:5173`。开发端口固定为 5173（`vite.config.ts` 中 `strictPort: true`），被占用时启动会直接失败，不会顺延到 5174。Vite 已将 `/api` 代理到 `http://127.0.0.1:8000`。
+访问 `http://127.0.0.1:5173`。开发端口固定为 5173（`vite.config.ts` 中 `strictPort: true`），被占用时启动会直接失败，不会顺延到 5174。Vite 已将 `/api` 代理到 `http://127.0.0.1:8000`（本地 uvicorn 场景）；若后端跑在 Docker Compose 里，需把 `frontend/.env.local` 的 `VITE_PROXY_TARGET` 改为 `http://127.0.0.1:8002`。
 
 ### 3.4 使用流程
 
@@ -90,7 +103,7 @@ docker compose up --build
 ```
 
 - 前端：`http://127.0.0.1:5173`（Nginx 提供生产构建产物，并把 `/api` 反向代理到后端）
-- 后端：`http://127.0.0.1:8001`（容器内仍监听 8000，宿主机映射到 8001，避免与本地 uvicorn 冲突；Compose 端口只绑定回环地址）
+- 后端：`http://127.0.0.1:8002`（容器内仍监听 8000，宿主机映射到 8002，避免与本地 uvicorn 占用的 8001 冲突；Compose 端口只绑定回环地址）
 - 数据库数据保存在 `pgdata` 卷；上传文件保存在 `./storage`。
 
 后端容器启动时自动执行 `alembic upgrade head`。前端容器使用多阶段构建：Node 构建静态文件，Nginx 提供服务；上传大小上限 100 MB，`/api` 代理超时 10 分钟以支持重建索引。

@@ -101,3 +101,12 @@ def test_blank_question_and_title_are_normalized() -> None:
         MessageCreate(content="   ")
     assert ConversationCreate(title="   ").title is None
     assert ConversationCreate(title="  标题  ").title == "标题"
+
+
+def test_credential_key_version_reads_documented_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import Settings
+
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_VERSION", "9")
+    assert Settings().credential_encryption_key_version == 9

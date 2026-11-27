@@ -29,7 +29,7 @@ def main() -> None:
     parser.add_argument(
         "--new-version",
         type=int,
-        default=settings.credential_key_version + 1,
+        default=settings.credential_encryption_key_version + 1,
         help="新密钥版本号，默认当前版本 + 1",
     )
     parser.add_argument(
@@ -40,7 +40,7 @@ def main() -> None:
     parser.add_argument(
         "--old-version",
         type=int,
-        default=settings.credential_key_version,
+        default=settings.credential_encryption_key_version,
         help="旧密钥版本号，默认取当前环境配置",
     )
     parser.add_argument("--dry-run", action="store_true", help="只统计，不写库")

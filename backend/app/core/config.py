@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://qa:qa@localhost:5432/document_qa"
 
     credential_encryption_key: str = ""
-    credential_key_version: int = 1
+    credential_encryption_key_version: int = 1
 
     # 单进程内存限流，按用户计数；设为 0 可关闭。
     rate_limit_ask_per_minute: int = 30
@@ -74,6 +74,18 @@ class Settings(BaseSettings):
     # 证据驱动扩展：从已命中片段抽取术语再检索，弥补问题与原文用词不一致的漏召回。
     evidence_expansion_rounds: int = 1
     evidence_expansion_terms: int = 2
+    # 按编号补全：问题点名条/章/节时补齐缺失原文，并接上被分页切开的后续片段。
+    # 关掉后可做「不做结构补全」的对照实验。
+    reference_fill_enabled: bool = True
+    reference_fill_max_chunks: int = 10
+    reference_fill_max_chars: int = 8000
+    reference_fill_continuation_span: int = 1
+    # 问法归一化：同一子问题额外补一条标准问法，降低同义改写带来的召回漂移。
+    query_variants_enabled: bool = True
+    query_variants_max: int = 1
+    # 计数/全量类问题的全文补证预算，与按编号补全分开配置。
+    full_scan_max_chunks: int = 60
+    full_scan_max_chars: int = 24000
     agent_max_tool_rounds: int = 3
     agent_max_tool_calls: int = 6
 

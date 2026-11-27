@@ -7,7 +7,7 @@ from pypdf import PdfReader
 from app.services.parsers.base import ParseError, TextBlock, normalize_text
 from app.services.parsers.headings import heading_for as _heading_for
 from app.services.parsers.headings import heading_path as _heading_path
-from app.services.parsers.headings import push_heading
+from app.services.parsers.headings import is_inline_heading, push_heading
 
 _PAGE_NUMBER = re.compile(r"^[-—–\s]*\d{1,4}[-—–\s]*$")
 _PAGE_NUMBER_CN = re.compile(r"^第\s*\d+\s*页(?:\s*[/／]\s*共\s*\d+\s*页)?$")
@@ -51,6 +51,9 @@ def _blocks_from_page(
         if heading is not None:
             flush()
             push_heading(stack, *heading)
+            # 条内分项「（一）……」既是层级也是正文，丢掉会只剩后半句。
+            if is_inline_heading(stripped):
+                buffer.append(stripped)
             continue
         buffer.append(stripped)
 

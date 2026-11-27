@@ -44,6 +44,7 @@
 - 融合候选中每个片段的 chunk_id、document_id、文件名，用于计算文件级 Recall@K/MRR
 - 最终进入上下文的片段 ID、被引用的片段 ID
 - 复合问题各子问题是否有片段进入上下文
+- 计数类问题的全文补证条数（`full_scan_chunks`）与按编号补证条数（`reference_chunks`，含其它文件的同一编号、同一文件里被分页切开的后续片段）；后者用于核对「资料里明明有这条，回答却说无法确认」的情况
 - 检索耗时、回答耗时、回答状态（`completed`、`insufficient`、`failed`）与错误码
 
 轨迹不记录资料正文、用户问题和 API Key，但会记录文件名和 chunk/document ID；如果文件名本身敏感，请在脱敏后的资料集上评测。
@@ -71,7 +72,42 @@ cd backend
 
 脚本会为每道题创建独立会话，记录 `conversation_id`、实际回答、状态、引用以及 `expected_files` / `expected_chunk_ids`，输出到 `evaluation/reports/<时间>-api-<数据集>.json` 与同名 `.md`。随后用 `analyze_traces.py` 计算检索指标。
 
-## 5. 记录要求
+## 5. 问法鲁棒性评测
+
+`evaluation/paraphrase_cases.json` 按「意图」组织用例：同一意图下面挂多条问法（同义改写、语序调整、术语替换、口语化、中英文混用、全角数字等），每条用例声明期望的意图指纹与预期事实。
+
+意图指纹由 `app/services/query_intent.py` 生成，格式为 `意图|编号|项号`（如 `content|第七十一条|第二项`、`count`、`last`）。同一意图的所有问法必须得到同一个指纹，这是「换一种问法仍走同一条检索路径」的可直接断言版本。
+
+先做不调用模型的归一化检查（可放进 CI）：
+
+```powershell
+cd backend
+.\.venv\Scripts\python ..\evaluation\evaluate_paraphrases.py --offline
+```
+
+再做真实接口评测（每个问法单独开会话，避免上下文影响结论）：
+
+```powershell
+cd backend
+.\.venv\Scripts\python ..\evaluation\evaluate_paraphrases.py `
+  --base-url http://127.0.0.1:8002 `
+  --collection-id <资料集 UUID>
+```
+
+报告输出到 `evaluation/reports/<时间>-paraphrase.json` 与同名 `.md`，指标口径：
+
+| 指标 | 含义 |
+|---|---|
+| 意图稳定性 | 所有问法归一到期望指纹的比例 |
+| 作答率 | 状态正常且没有落入「无法确认」的比例 |
+| 要点命中率 | 回答包含该意图预期事实的比例 |
+| 文件覆盖 | 预期文件都出现在引用里的比例 |
+| 引用稳定性 | 与首个问法的引用集合 Jaccard 均值 |
+| 回答稳定性 | 与首个问法的回答字符二元组 Jaccard 均值 |
+
+只报告本次实际运行的数据；新增资料或修改提示词后需要重跑并保留新旧报告。
+
+## 6. 记录要求
 
 - 报告只写本次实际运行的环境、结果与失败案例。
 - 修改切片长度、候选数量、RRF 参数、提示词或模型后，需要重新运行并保留新旧报告。

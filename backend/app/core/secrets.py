@@ -36,7 +36,7 @@ def encrypt_secret(
     `key` / `key_version` 仅供轮换脚本使用；业务调用使用当前环境配置。
     """
     settings = get_settings()
-    version = settings.credential_key_version if key_version is None else key_version
+    version = settings.credential_encryption_key_version if key_version is None else key_version
     nonce = os.urandom(_NONCE_SIZE)
     ciphertext = AESGCM(_load_key(key)).encrypt(nonce, plaintext.encode("utf-8"), b"")
     return base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii"), version
@@ -48,7 +48,7 @@ def decrypt_secret(
     *,
     key: str | None = None,
 ) -> str:
-    if key is None and key_version != get_settings().credential_key_version:
+    if key is None and key_version != get_settings().credential_encryption_key_version:
         raise RuntimeError(
             "密钥版本与当前 CREDENTIAL_ENCRYPTION_KEY_VERSION 不一致，"
             "请先运行密钥轮换脚本"

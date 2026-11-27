@@ -5,6 +5,7 @@ from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
+from app.core.text_utils import escape_like
 from app.models.citation import Citation
 from app.models.collection import Collection
 from app.models.conversation import Conversation
@@ -59,7 +60,7 @@ def list_recent_conversations(
     if collection_id is not None:
         stmt = stmt.where(Conversation.collection_id == collection_id)
     if keyword:
-        escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        escaped = escape_like(keyword)
         stmt = stmt.where(Conversation.title.ilike(f"%{escaped}%", escape="\\"))
     stmt = (
         stmt.order_by(updated_at.desc(), Conversation.id.desc()).limit(limit).offset(offset)
@@ -114,6 +115,7 @@ def _message_out(message: Message, citations: list[Citation]) -> MessageOut:
         status=message.status,
         created_at=message.created_at,
         citations=[CitationOut.model_validate(item) for item in citations],
+        retrieval_trace=message.retrieval_trace or {},
     )
 
 

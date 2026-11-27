@@ -71,6 +71,7 @@ backend/
 ├─ scripts/
 │  ├─ init_local_db.sql            # 无 Docker 时建库建账号
 │  ├─ rebuild_terms.py             # 补建 BM25 词表
+│  ├─ reingest_documents.py        # 解析规则升级后按新规则重新入库
 │  └─ rotate_credential_key.py     # 主密钥轮换脚本
 └─ tests/
    ├─ conftest.py                  # 测试夹具（按需创建）
@@ -104,6 +105,9 @@ backend/
 | `services/embeddings.py` | Embedding 服务封装与批量请求 |
 | `services/model_provider.py` | 支持服务商白名单、密钥读取、连接测试 |
 | `services/retrieval/vector.py`、`keyword.py`、`fusion.py` | 语义召回、关键词召回、RRF 融合去重；不生成自然语言 |
+| `services/retrieval/reference_fill.py` | 按问题点名的条/章/节补全原文（跨文件、分页承接），编号识别与取数规则集中在这里 |
+| `services/query_intent.py` | 问法归一化：意图类型 + 编号 + 项号 + 标准问法，同义改写走同一检索路径 |
+| `services/retrieval/full_doc.py` | 计数/全量类问题补齐命中文档的完整片段序列 |
 | `services/agent.py` | 单 Agent 的检索范围、证据选择与上下文组织 |
 | `services/agent_tools.py` | `search_documents` 工具定义、参数校验与工具调用循环 |
 | `services/answering.py` | 回答流程编排、提示词、证据不足处理 |

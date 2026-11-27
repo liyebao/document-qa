@@ -3,6 +3,7 @@
 from app.services.answer_checks import (
     check_answer,
     dangling_references,
+    leaked_markers,
     unsupported_code_lines,
 )
 
@@ -25,6 +26,12 @@ def test_dangling_reference_detects_multiple_forms_once():
 def test_plain_answer_has_no_warnings():
     answer = "建用户会顺带建同名 schema，这是原生 PostgreSQL 没有的行为 [1]。"
     assert check_answer(answer, EVIDENCE) == []
+
+
+def test_internal_retrieval_marker_is_reported():
+    answer = "第七十一条各项见 紧接上文：[2]，并见下文见：[8]。"
+    assert leaked_markers(answer) == ["下文见：", "紧接上文："]
+    assert any("内部标记泄漏" in item for item in check_answer(answer, EVIDENCE))
 
 
 def test_code_line_copied_verbatim_passes():

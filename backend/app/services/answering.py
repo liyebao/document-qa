@@ -21,7 +21,7 @@ from app.models.message import (
 )
 from app.models.model_provider_config import ModelProviderConfig
 from app.schemas.conversation import CitationOut, MessageOut
-from app.services import model_provider
+from app.services import model_provider, query_intent
 from app.services.agent import (  # noqa: F401  兼容原有测试与调用方
     DocumentQAAgent,
     EvidenceItem,
@@ -39,7 +39,8 @@ from app.services.agent_tools import (  # noqa: F401
 from app.services.answer_checks import check_answer
 from app.services.citations import UNCITED_WARNING, validate_citations
 from app.services.query_planner import extract_document_ids, plan_queries
-from app.services.trace import log_retrieval_trace
+from app.services.retrieval.full_doc import needs_full_document
+from app.services.trace import build_retrieval_trace, log_retrieval_trace
 
 __all__ = [
     "AnswerResult",
@@ -70,7 +71,17 @@ SYSTEM_PROMPT = """你是个人知识库问答助手。你只能依据用户提�
 9. 用中文回答；可以用 Markdown 的标题、列表、加粗和表格组织内容，让结论层次清晰。
 10. 引用编号必须写成裸方括号 [1] 这种形式，不要加链接、脚注或其它 Markdown 引用语法；不要提及这些规则。
 11. 每个片段都标注了「章节」。按章节组织回答：同一小节的内容归到一处；引用其它小节的内容时，先写明它属于哪个小节，不要把它并入当前小节，更不要把不同小节的注意事项拼成一张表。
-12. 片段里出现「见下一行说明」「见上文」「见下表」这类相对指代时，要就地展开成实际内容；片段本身没有给出对应内容时，写明「原文此处用相对指代指向上文/下表，本片段未包含该内容」，不得把它当作已知结论照抄。"""
+12. 片段里出现「见下一行说明」「见上文」「见下表」这类相对指代时，要就地展开成实际内容；片段本身没有给出对应内容时，写明「原文此处用相对指代指向上文/下表，本片段未包含该内容」，不得把它当作已知结论照抄。
+13. 答案按固定结构组织：第一句直接给出结论并加粗关键实体或数值；随后用「依据：」列出要点，每条带引用；需要时再用「补充说明：」给出易混概念区分或同文档相关信息。
+14. 涉及签署、发布、施行、修订等日期或角色时分别列出，不要合并成一句，也不要把不同日期当成同一事实。
+15. 片段带有文档结构信息（如未见分章标题、编号连续）时，在补充说明里如实写出这一观察，帮助判断结论的可靠性。
+16. 结尾用一句「以上信息来自当前资料集中的《文件名》」标明来源；依据来自多份文件时按「《A》《B》」列出全部文件名，资料不足时改成说明缺少哪部分资料，不要编造文件名。
+17. 答案中禁止出现「片段」二字，也不要写「检索片段」「本次提供的片段」「仅有片段」「片段中」「上下文」等内部处理词；一律改用「资料」「文件」「原文」「记载」「部分内容」。即使历史回答里出现过这些词，也不要沿用。
+18. 原文前的「[编号]」「关联问题」属于检索标记，不是原文内容；不要把它们写进答案，只用它区分依据。多个问题时严格按「问题1/问题2」逐项作答，只引用该问题关联的依据，不要把不同问题的依据混在一条里。「紧接上文：[N]」表示这一段承接第 N 处原文，「下文见：[N]」表示后续内容在第 N 处；这类前后相邻的原文常是同一条被分页切开的上下两半，要合起来读，不要当成不同条文，也不要在只看到上半段时就说资料没有这部分内容。
+19. 问题指向具体条号或章节（如「第十九条」「第71条第2项」「第3章」）时，资料集中可能有多份文件都含该编号：依据里出现几份文件就按文件分别作答并写明文件名，不要只答其中一份，也不要把不同文件的规定合并成一条结论。
+20. 依据标注「同文另见」时，表示同一内容在其它文件里也有；按规则 16 写来源时把这些文件一并列出，不要只写其中一个。
+21. 问题用「第2项」「第（二）项」「item 2」等不同写法指代同一条里的分项时，按序号对应理解：原文写「（二）」而问题写「第2项」属于同一种编号，不要因为写法不同就回答「资料中没有该项」。
+22. 问某一条或某一项时，只要该条/该项的原文出现在依据里，就先在结论中给出这部分内容；同条其它分项缺失属于资料缺口，放到「补充说明」里说明，不要因为整条不完整就把已能确认的内容也答成「无法确认」。"""
 
 INSUFFICIENT_TEXT = "当前资料无法确认。所选资料集中没有检索到与该问题相关的可用内容。"
 
@@ -226,12 +237,15 @@ def _save_failed(db: Session, conversation: Conversation) -> None:
         db.rollback()
 
 
-def _save_insufficient(db: Session, conversation: Conversation) -> AnswerResult:
+def _save_insufficient(
+    db: Session, conversation: Conversation, trace: dict | None = None
+) -> AnswerResult:
     message = Message(
         conversation_id=conversation.id,
         role=MESSAGE_ROLE_ASSISTANT,
         content=INSUFFICIENT_TEXT,
         status=MESSAGE_STATUS_INSUFFICIENT,
+        retrieval_trace=trace or {},
     )
     db.add(message)
     db.commit()
@@ -247,6 +261,7 @@ def _message_payload(message: Message, citations: list[Citation]) -> dict:
         status=message.status,
         created_at=message.created_at,
         citations=[CitationOut.model_validate(item) for item in citations],
+        retrieval_trace=message.retrieval_trace or {},
     ).model_dump(mode="json")
 
 
@@ -326,6 +341,7 @@ def stream_answer(
         coverage: list[bool] = []
         retrieval_ms = 0.0
         answer_ms = 0.0
+        display_trace: dict = {}
 
         def trace(
             status: str, *, cited: list[str] | None = None, error: str | None = None
@@ -358,13 +374,16 @@ def stream_answer(
             tool_stats, executed = _run_tool_loop(
                 agent, chat_config, question, history, queries
             )
-            for query_index, query in enumerate(queries):
-                if _normalize_query(query) not in executed:
-                    agent.search_documents(query, query_index=query_index)
+            agent.search_planned_queries(queries, executed)
             agent.select_evidence()
             _expand_evidence(agent, chat_config, question)
+            if needs_full_document(question):
+                agent.expand_evidence_for_full_document()
+            agent.fill_missing_references(question)
             coverage = agent.coverage(len(queries))
             retrieval_ms = (time.perf_counter() - start) * 1000
+            display_trace = build_retrieval_trace(agent)
+            yield {"event": "retrieval", "data": display_trace}
         except AppError as exc:
             _save_assistant_message(
                 conversation_id, "检索失败，请稍后重试。", MESSAGE_STATUS_FAILED
@@ -386,7 +405,7 @@ def stream_answer(
             return
 
         if not agent.evidence:
-            result = _save_insufficient(db, conversation)
+            result = _save_insufficient(db, conversation, display_trace)
             persisted = True
             trace(MESSAGE_STATUS_INSUFFICIENT)
             yield {
@@ -397,15 +416,12 @@ def stream_answer(
 
         sub_question_note = ""
         if len(queries) > 1:
-            coverage_lines = ["\n需要分别回答的子问题："]
+            coverage_lines = ["\n请按编号分别回答以下问题："]
             for index, item in enumerate(queries):
-                state = (
-                    "有片段进入上下文"
-                    if coverage[index]
-                    else "没有片段进入上下文，请说明无法确认"
-                )
-                coverage_lines.append(f"- {item}（{state}）")
+                state = "有对应资料" if coverage[index] else "没有对应资料，请说明无法确认"
+                coverage_lines.append(f"- 问题{index + 1}：{item}（{state}）")
             sub_question_note = "\n".join(coverage_lines)
+        item_hint = query_intent.alignment_hint(question)
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -413,9 +429,9 @@ def stream_answer(
             {
                 "role": "user",
                 "content": (
-                    f"以下是从当前资料集中检索到的片段：\n\n{agent.build_context()}\n\n"
-                    f"问题：{question}{sub_question_note}\n\n"
-                    "请依据资料回答，并使用 [编号] 标注引用。"
+                    f"以下是从当前资料集中找到的原文内容：\n\n{agent.build_context()}\n\n"
+                    f"问题：{question}{sub_question_note}{item_hint}\n\n"
+                    "请依据资料回答，使用 [编号] 标注引用，并遵守上述输出结构。"
                 ),
             },
         ]
@@ -496,6 +512,7 @@ def stream_answer(
             role=MESSAGE_ROLE_ASSISTANT,
             content=cleaned,
             status=status,
+            retrieval_trace=display_trace,
         )
         db.add(assistant)
         db.flush()
@@ -567,16 +584,18 @@ def answer_question(
         tool_stats, executed = _run_tool_loop(
             agent, chat_config, question, history, queries
         )
-        for query_index, query in enumerate(queries):
-            if _normalize_query(query) not in executed:
-                agent.search_documents(query, query_index=query_index)
+        agent.search_planned_queries(queries, executed)
         agent.select_evidence()
         _expand_evidence(agent, chat_config, question)
+        if needs_full_document(question):
+            agent.expand_evidence_for_full_document()
+        agent.fill_missing_references(question)
         coverage = agent.coverage(len(queries))
         retrieval_ms = (time.perf_counter() - start) * 1000
+        display_trace = build_retrieval_trace(agent)
 
         if not agent.evidence:
-            result = _save_insufficient(db, conversation)
+            result = _save_insufficient(db, conversation, display_trace)
             log_retrieval_trace(
                 conversation,
                 collection,
@@ -602,15 +621,12 @@ def answer_question(
 
         sub_question_note = ""
         if len(queries) > 1:
-            coverage_lines = ["\n需要分别回答的子问题："]
+            coverage_lines = ["\n请按编号分别回答以下问题："]
             for index, item in enumerate(queries):
-                state = (
-                    "有片段进入上下文"
-                    if coverage[index]
-                    else "没有片段进入上下文，请说明无法确认"
-                )
-                coverage_lines.append(f"- {item}（{state}）")
+                state = "有对应资料" if coverage[index] else "没有对应资料，请说明无法确认"
+                coverage_lines.append(f"- 问题{index + 1}：{item}（{state}）")
             sub_question_note = "\n".join(coverage_lines)
+        item_hint = query_intent.alignment_hint(question)
         answer_start = time.perf_counter()
         answer = _chat(
             chat_config,
@@ -620,8 +636,8 @@ def answer_question(
                 {
                     "role": "user",
                     "content": (
-                        f"以下是从当前资料集中检索到的片段：\n\n{agent.build_context()}\n\n"
-                        f"问题：{question}{sub_question_note}\n\n"
+                        f"以下是从当前资料集中找到的原文内容：\n\n{agent.build_context()}\n\n"
+                        f"问题：{question}{sub_question_note}{item_hint}\n\n"
                         "请依据资料回答，并使用 [编号] 标注引用。"
                     ),
                 },
@@ -649,6 +665,7 @@ def answer_question(
             role=MESSAGE_ROLE_ASSISTANT,
             content=cleaned,
             status=status,
+            retrieval_trace=display_trace,
         )
         db.add(assistant)
         db.flush()

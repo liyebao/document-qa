@@ -1,0 +1,95 @@
+[
+  {
+    "id": "article-71-item-2",
+    "intent": "content",
+    "expected_key": "content|第七十一条|第二项",
+    "expected_files": ["基金会管理条例"],
+    "expected_points": ["违反本条例第三十九条规定造成基金会财产损失"],
+    "paraphrases": [
+      "第七十一条第2项的内容是什么？",
+      "第七十一条第二项怎么规定的",
+      "71条第二项写了什么",
+      "第71条第（二）项原文",
+      "第七十一条的第二个分项是什么",
+      "７１条第２项",
+      "article 71 item 2 规定的内容"
+    ]
+  },
+  {
+    "id": "article-33-item-3",
+    "intent": "content",
+    "expected_key": "content|第三十三条|第三项",
+    "expected_files": ["基金会管理条例"],
+    "expected_points": ["向登记管理机关"],
+    "paraphrases": [
+      "33条第3项说的是什么",
+      "第三十三条第三项讲什么",
+      "第33条的第3个小项是什么",
+      "article 33 item 3"
+    ]
+  },
+  {
+    "id": "article-62-item-5",
+    "intent": "content",
+    "expected_key": "content|第六十二条|第五项",
+    "expected_files": ["基金会管理条例"],
+    "expected_points": ["协助登记管理机关"],
+    "paraphrases": [
+      "62条第5项",
+      "第六十二条第五项的内容",
+      "第62条的第五个小项",
+      "article 62 item 5"
+    ]
+  },
+  {
+    "id": "article-2",
+    "intent": "content",
+    "expected_key": "content|第二条",
+    "expected_files": ["基金会管理条例"],
+    "expected_points": ["本条例所称基金会"],
+    "paraphrases": [
+      "第二条的内容是什么？",
+      "02条讲什么",
+      "第2条怎么规定",
+      "article 2 的内容"
+    ]
+  },
+  {
+    "id": "article-19-two-files",
+    "intent": "content",
+    "expected_key": "content|第十九条",
+    "expected_files": ["基金会管理条例", "中医药传统知识保护条例"],
+    "expected_points": ["清算"],
+    "paraphrases": [
+      "第十九条的内容是什么",
+      "19条说的是什么",
+      "第19条怎么规定",
+      "article 19 内容"
+    ]
+  },
+  {
+    "id": "count-articles",
+    "intent": "count",
+    "expected_key": "count",
+    "expected_files": ["基金会管理条例"],
+    "expected_points": ["七十九"],
+    "paraphrases": [
+      "这份条例总共有多少条？",
+      "条例一共几条",
+      "全文条数是多少",
+      "how many articles are there"
+    ]
+  },
+  {
+    "id": "last-article",
+    "intent": "last",
+    "expected_key": "last",
+    "expected_files": ["基金会管理条例"],
+    "expected_points": ["2027年1月1日"],
+    "paraphrases": [
+      "最后一条是什么",
+      "末条怎么规定",
+      "last article 说了什么"
+    ]
+  }
+]

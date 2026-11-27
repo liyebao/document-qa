@@ -4,6 +4,7 @@ import uuid
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.text_utils import escape_like
 from app.models.chunk import Chunk
 from app.models.collection import Collection
 from app.models.document import DOCUMENT_STATUS_READY, Document
@@ -28,11 +29,6 @@ _INTERROGATIVE_TERMS = {
 }
 _CJK_RUN = re.compile(r"[\u4e00-\u9fa5]+")
 _LATIN_TERM = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-]{1,}")
-
-
-def escape_like(term: str) -> str:
-    """转义 LIKE 通配符，避免用户输入被当成模式匹配。"""
-    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def extract_terms(query: str, max_terms: int = 16) -> list[str]:

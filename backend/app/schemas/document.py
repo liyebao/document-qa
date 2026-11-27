@@ -56,6 +56,27 @@ class ChunkContextOut(BaseModel):
     next: ChunkSnippet | None = None
 
 
+class DocumentPreviewBlock(BaseModel):
+    chunk_id: uuid.UUID
+    ordinal: int
+    source_location: str
+    text: str
+
+
+class DocumentPreviewOut(BaseModel):
+    """按片段顺序返回解析文本，供抽屉内预览与引用定位。
+
+    浏览器无法内联渲染 Office / EPUB，用文本预览替代"下载后才能看"；
+    片段过多时截断，避免几百页的文档把响应撑到几十兆。
+    """
+
+    document_id: uuid.UUID
+    document_name: str
+    format: str
+    truncated: bool = False
+    blocks: list[DocumentPreviewBlock]
+
+
 class UrlDocumentCreate(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
 

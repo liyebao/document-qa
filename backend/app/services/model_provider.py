@@ -186,6 +186,57 @@ def get_provider_spec(provider_key: str) -> ProviderSpec:
     return spec
 
 
+def _tags_url(base_url: str) -> str:
+    """Ollama 的模型清单在 /api/tags，而不是 OpenAI 兼容的 /v1 路径。"""
+    trimmed = base_url.rstrip("/")
+    if trimmed.endswith("/v1"):
+        trimmed = trimmed[: -len("/v1")]
+    return f"{trimmed}/api/tags"
+
+
+def list_installed_models(provider_key: str) -> tuple[bool, list[str], str]:
+    """查询本地服务实际已下载的模型。
+
+    返回 (是否连上, 模型名列表, 连不上时的说明)。云端服务商没有"本地已安装"
+    的概念，直接返回不可探测，由前端沿用静态推荐清单。
+
+    探测超时设得很短：这只是给下拉框补充信息，不能让它卡住设置页。
+    """
+    spec = get_provider_spec(provider_key)
+    if spec.key != "ollama":
+        return False, [], "该服务商不支持本地模型探测"
+    try:
+        response = _http_client().get(_tags_url(spec.base_url), timeout=3.0)
+    except httpx.HTTPError:
+        return False, [], f"无法连接本地 Ollama（{spec.base_url}），请确认服务已启动"
+    if response.status_code >= 400:
+        return False, [], f"本地 Ollama 返回 {response.status_code}"
+    try:
+        payload = response.json()
+    except ValueError:
+        return False, [], "本地 Ollama 返回了无法解析的响应"
+
+    installed: list[str] = []
+    for item in payload.get("models") or []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or item.get("model")
+        if isinstance(name, str) and name:
+            installed.append(name)
+    return True, installed, ""
+
+
+def _friendly_model_error(spec: ProviderSpec, message: str) -> str:
+    """把服务商原始的 model not found 翻译成可操作的提示。"""
+    lowered = message.lower()
+    missing = ("not found" in lowered) or ("not exist" in lowered) or ("no such" in lowered)
+    if not missing:
+        return message
+    if spec.key == "ollama":
+        return f"{message}（本地未下载该模型，请先执行 ollama pull <模型名>）"
+    return f"{message}（该服务商未提供此模型，请更换模型名）"
+
+
 def _mask_ciphertext(ciphertext: str, key_version: int) -> str | None:
     """解密并脱敏；解不开时返回 None。
 
@@ -700,6 +751,11 @@ def chat_completion(
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
         raise AppError("MODEL_PROVIDER_ERROR", f"{spec.label} 未返回回答内容", 502)
+    if choices[0].get("finish_reason") == "length":
+        # 预算被吃满时回答会在中途截断，用户看到的是一段没有结尾的答案。
+        logger.warning(
+            "%s 的回答达到 max_tokens=%s 上限，内容可能被截断", spec.label, max_tokens
+        )
     return content.strip()
 
 
@@ -882,7 +938,9 @@ def test_connection(
                 f"{'已建立 HNSW 索引' if indexed else '精确扫描'}）"
             )
         except AppError as exc:
-            messages.append(f"Embedding 服务连接失败：{exc.message}")
+            messages.append(
+                f"Embedding 服务连接失败：{_friendly_model_error(spec, exc.message)}"
+            )
     elif test_embedding:
         messages.append("该服务商未配置 Embedding，跳过 Embedding 测试")
 
@@ -901,7 +959,9 @@ def test_connection(
             chat_ok = True
             messages.append("回答模型连接正常")
         except AppError as exc:
-            messages.append(f"回答模型连接失败：{exc.message}")
+            messages.append(
+                f"回答模型连接失败：{_friendly_model_error(spec, exc.message)}"
+            )
 
     ok = (embedding_ok if embedding_tested else True) and (
         chat_ok if test_chat else True
