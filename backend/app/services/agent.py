@@ -151,6 +151,8 @@ class DocumentQAAgent:
         self._chunk_queries: dict[uuid.UUID, set[int]] = {}
         # 判证结果按片段累积，多轮选择时只对新增候选调用模型。
         self._judge_scores: dict[uuid.UUID, float] = {}
+        # 向量路召回的原始相似度，仅供 trace/排错查看。
+        self.vector_scores: dict[uuid.UUID, float] = {}
         # 已经检索过的查询，供证据扩展去重，避免重复召回同一批片段。
         self._executed_queries: set[str] = set()
 
@@ -170,14 +172,18 @@ class DocumentQAAgent:
                 "当前 Embedding 模型维度与资料集索引不一致，请恢复原模型或重建索引",
                 422,
             )
-        return vector_search(
+        pairs = vector_search(
             self.db,
             collection_id=self.collection.id,
             user_id=self.collection.user_id,
             query_vector=query_vector,
             limit=settings.retrieval_candidates,
             document_ids=self.document_ids,
+            min_score=settings.retrieval_min_score,
         )
+        # 相似度留档，便于排错时看清"为什么这块被召回/被丢弃"。
+        self.vector_scores.update(pairs)
+        return [chunk_id for chunk_id, _ in pairs]
 
     def _keyword_candidates(self, query: str) -> list[uuid.UUID]:
         """关键词路召回；分词全部未命中时回退子串匹配。"""
@@ -323,10 +329,15 @@ class DocumentQAAgent:
             return None
         # 同分时保留 RRF 原顺序：判证结果是二值的，用 UUID 兜底会打乱保留项的先后。
         order = {chunk_id: index for index, (chunk_id, _) in enumerate(candidates)}
-        return sorted(
+        ordered = sorted(
             candidates,
             key=lambda item: (-scores.get(item[0], float("-inf")), order[item[0]]),
         )
+        # 判证一条都没保留：返回空候选，让上层如实回答"资料里没有"，
+        # 而不是把 0 分片段按 RRF 顺序硬塞进上下文。
+        if all(scores.get(chunk_id, 0.0) <= 0.0 for chunk_id, _ in ordered):
+            return []
+        return ordered
 
     def _apply_diversity(
         self, candidates: list[tuple[uuid.UUID, float]]

@@ -39,9 +39,14 @@ def vector_search(
     query_vector: list[float],
     limit: int,
     document_ids: list[uuid.UUID] | None = None,
-) -> list[uuid.UUID]:
-    """pgvector 语义检索；权限与文件状态在召回 SQL 中先行过滤。"""
+    min_score: float = 0.0,
+) -> list[tuple[uuid.UUID, float]]:
+    """pgvector 语义检索；权限与文件状态在召回 SQL 中先行过滤。
+
+    返回 (片段 id, 余弦相似度)，相似度低于 min_score 的直接丢弃。
+    """
     distance, dimension_filter = _distance_and_dimension_filter(query_vector)
+    similarity = (1.0 - distance).label("similarity")
     conditions = [
         Collection.id == collection_id,
         Collection.user_id == user_id,
@@ -55,16 +60,19 @@ def vector_search(
         conditions.append(dimension_filter)
     if document_ids is not None:
         conditions.append(Document.id.in_(document_ids))
+    if min_score > 0:
+        # 阈值放在 SQL 里过滤，top-k 取到的是"够相关"的片段而不是纯排名前列。
+        conditions.append(similarity >= min_score)
     if len(query_vector) in _ANN_VECTOR_DIMENSIONS | _ANN_HALFVEC_DIMENSIONS:
         # 过滤条件较多时默认 ef_search=40 容易召回不足；只在命中 ANN 索引时调整，
         # 不影响精确扫描路径。
         db.execute(text("SET LOCAL hnsw.ef_search = 100"))
     stmt = (
-        select(Chunk.id)
+        select(Chunk.id, similarity)
         .join(Document, Chunk.document_id == Document.id)
         .join(Collection, Document.collection_id == Collection.id)
         .where(*conditions)
         .order_by(distance)
         .limit(limit)
     )
-    return list(db.scalars(stmt).all())
+    return [(chunk_id, float(score)) for chunk_id, score in db.execute(stmt).all()]

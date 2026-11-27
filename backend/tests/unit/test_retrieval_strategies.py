@@ -157,14 +157,54 @@ def test_llm_judge_keeps_rrf_order_among_kept(monkeypatch) -> None:
     assert agent.llm_rerank_fallback is False
 
 
+def test_llm_judge_keeps_nothing_drops_all_candidates(monkeypatch) -> None:
+    """判证说"一条都不相关"时返回空候选，让上层如实回答库里没有。"""
+    collection = Collection(id=uuid.uuid4(), user_id=uuid.uuid4(), name="资料集")
+    document = _document(collection.id, "note.md")
+    chunks = [_chunk(document, index) for index in range(2)]
+    agent = DocumentQAAgent(
+        db=None,
+        collection=collection,
+        embedding_config=None,
+        document_ids=None,
+        chat_config=SimpleNamespace(
+            chat_model="gpt-4o-mini",
+            provider_key="openai",
+            api_key_ciphertext="cipher",
+            key_version=1,
+        ),
+    )
+    for chunk in chunks:
+        agent._chunks[chunk.id] = (chunk, document)
+    monkeypatch.setattr(
+        "app.services.agent.get_settings",
+        lambda: _settings(rerank_strategy="llm", diversity_enabled=False),
+    )
+    monkeypatch.setattr(
+        "app.services.agent.model_provider.get_provider_spec", lambda _key: object()
+    )
+    monkeypatch.setattr("app.services.agent.read_secret", lambda *a, **k: "sk")
+    monkeypatch.setattr(
+        "app.services.agent.model_provider.chat_completion",
+        lambda *a, **k: '{"keep": []}',
+    )
+    candidates = [(chunks[0].id, 1 / 61), (chunks[1].id, 1 / 62)]
+
+    assert agent._apply_rerank(candidates) == []
+    assert agent.llm_rerank_used is True
+    assert agent.llm_rerank_fallback is False
+
+
 # ---------------------------------------------------------------- LLM 判证解析
 
 
 def test_parse_keep_indices_filters_out_of_range_and_bad_input() -> None:
     assert parse_keep_indices('{"keep": [1, 3]}', 3) == [1, 3]
     assert parse_keep_indices('{"keep": [0, 4, 2, 2]}', 3) == [2]
+    # 列表非空但全是非法编号 → 输出异常，回退 RRF（None）
     assert parse_keep_indices('{"keep": [true, "1"]}', 3) is None
-    assert parse_keep_indices('{"keep": []}', 3) is None
+    # 空列表是合法结果：这批候选都不相关，交由上层走证据不足分支
+    assert parse_keep_indices('{"keep": []}', 3) == []
     assert parse_keep_indices("不是 JSON", 3) is None
 
 

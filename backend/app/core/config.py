@@ -55,6 +55,10 @@ class Settings(BaseSettings):
 
     retrieval_candidates: int = 20
     retrieval_top_k: int = 5
+    # 向量召回的最低余弦相似度（1 - cosine_distance）；低于该值的片段直接丢弃，
+    # 避免"库里没有也在硬答"。本机 bge-m3 实测：库内问题 0.52–0.70，库外问题
+    # 0.38–0.48，所以默认取 0.45；换成别的 embedding 模型需要重新标定。
+    retrieval_min_score: float = 0.45
     rrf_k: int = 60
     # 召回组合：hybrid=向量+关键词后 RRF 融合；vector / keyword 用于消融对照实验。
     retrieval_mode: Literal["hybrid", "vector", "keyword"] = "hybrid"
